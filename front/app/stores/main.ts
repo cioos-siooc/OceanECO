@@ -96,6 +96,9 @@ function createInitialState() {
         selectedGliderId: null as string | null,
         hoveredGliderId: null as string | null,
         showGliderLayer: true,
+        // Bumped by GliderSection's 3D button: index.vue (which holds the map)
+        // tilts onto the selected track, or flattens the map if already tilted.
+        gliderTiltToken: 0,
 
         // Sensor panel filters — shared with the map so markers stay in sync with the sensor list.
         sensorSearchQuery: '' as string,
@@ -350,6 +353,9 @@ export const useMainStore = defineStore('main', {
         },
         setShowGliderLayer(value: boolean) {
             this.showGliderLayer = value;
+        },
+        toggleGliderTilt() {
+            this.gliderTiltToken++;
         },
         setSensorSearchQuery(query: string) {
             this.sensorSearchQuery = query;

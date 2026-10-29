@@ -19,6 +19,8 @@ const LAYER_TRACK_SELECTED = 'glider-track-selected';
 const LAYER_TRACK_HOVER = 'glider-track-hover';
 const LAYER_HEAD = 'glider-head';
 export const GLIDER_CLICK_LAYERS = [LAYER_TRACK, LAYER_HEAD];
+/** Bottom-most glider layer, for slotting the depth curtain under the tracks. */
+export const GLIDER_BASE_LAYER = LAYER_TRACK_CASING;
 const GLIDER_LAYER_IDS = [LAYER_TRACK_CASING, LAYER_TRACK, LAYER_TRACK_SELECTED, LAYER_TRACK_HOVER, LAYER_HEAD];
 
 const IMG = { live: 'glider-live', historic: 'glider-historic' } as const;

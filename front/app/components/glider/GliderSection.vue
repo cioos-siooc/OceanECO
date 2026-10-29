@@ -4,6 +4,9 @@
       <!-- Explore's own sub-view switch, passed in so it stays in one place. -->
       <slot name="views" />
       <SegmentedControl v-model="xAxis" :items="xAxisItems" size="xs" aria-label="Horizontal axis" />
+      <UButton size="xs" variant="outline" color="neutral" :class="tilted ? 'oe-on' : ''"
+        :aria-pressed="tilted" title="Tilt the map onto this track to see the section hanging under it, or back to flat"
+        @click="mainStore.toggleGliderTilt()">3D</UButton>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
       <div class="grow" />
       <span v-if="glider" class="range-label oe-num">{{ glider.id }} · {{ rangeLabel }}</span>
@@ -36,9 +39,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import axios from 'axios'
 import { useMainStore } from '~/stores/main'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
+import { fetchGliderSection, type GliderSectionResponse } from '~~/composables/useGliderSectionFetch'
 import TimeDepthHeatmap from '../depth/TimeDepthHeatmap.vue'
 import ChartContextBar, { type ContextItem } from '../ChartContextBar.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -50,25 +53,15 @@ import SegmentedControl from '../ui/SegmentedControl.vue'
  * Colours follow the map's colorbar for the selected field (`colorFn`, in the
  * display unit).
  */
-const props = defineProps<{ colorFn: (v: number) => string }>()
+defineProps<{ colorFn: (v: number) => string }>()
 
 const mainStore = useMainStore()
 const { variableLabel, toDisplayValue, formatDisplayValue } = useVariableRegistry()
-const apiBaseUrl = useRuntimeConfig().public.apiBaseUrl
-
-interface GliderSectionResponse {
-  profiles: number[]
-  time: string[]
-  lat: number[]
-  lon: number[]
-  distanceKm: number[]
-  depths: number[]
-  values: (number | null)[][]
-}
-
 const glider = computed(() => mainStore.gliders.find(g => g.id === mainStore.selectedGliderId) ?? null)
 const varId = computed(() => mainStore.selected_variable.var)
 const gliderHasVar = computed(() => !!glider.value?.variables.includes(varId.value))
+// Any tilt counts, however it got there: the button then flattens the map.
+const tilted = computed(() => (mainStore.mapView?.pitch ?? 0) > 10)
 
 const xAxis = ref<'time' | 'distance'>('time')
 const xAxisItems = [
@@ -88,8 +81,8 @@ watch([() => glider.value?.id, varId], async ([id, v]) => {
   const seq = ++requestSeq
   loading.value = true
   try {
-    const r = await axios.post(`${apiBaseUrl}/gliderSection`, { deployment: id, var: v })
-    if (seq === requestSeq) section.value = r.data
+    const data = await fetchGliderSection(id, v)
+    if (seq === requestSeq) section.value = data
   } catch (e: any) {
     if (seq === requestSeq) loadError.value = e?.response?.data?.detail ?? String(e)
   } finally {

@@ -215,7 +215,10 @@ import { resolveColormap } from '~~/composables/useColormapResolver'
 import { MAP_BOUNDS, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_STYLE, BASEMAP_PAINT, BASEMAP_FILLS, BASEMAP_HIDDEN_SOURCE_LAYERS } from '@/config/app'
 import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
-import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, GLIDER_CLICK_LAYERS } from '~~/composables/useGliderLayer';
+import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
+import { setGliderCurtain, setGliderCurtainVisibility, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
+import { fetchGliderSection } from '~~/composables/useGliderSectionFetch';
+import { useFieldColorRamp } from '~~/composables/useFieldColorRamp';
 import { addBuoyLayer, setBuoyLayerVisibility, setSelectedBuoy, setHoveredBuoy, SOURCE_ID, STATIONS_LAYER_ID, type MultiSensorCandidate } from '~~/composables/useBuoyLayer';
 import getSensorTimeseries from '~~/composables/useSensorTimeseries';
 import AnalysisWorkspace from '../components/AnalysisWorkspace.vue'
@@ -227,7 +230,7 @@ import SegmentedControl from '../components/ui/SegmentedControl.vue'
 
 ///////////////////////////////////  SETUP  ///////////////////////////////////
 
-import { useMainStore } from '../stores/main'
+import { useMainStore, type GliderDeployment } from '../stores/main'
 import { trackEvent } from '~~/composables/useAnalytics'
 import { useRasterProbe } from '~~/composables/useRasterProbe'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
@@ -1177,7 +1180,86 @@ async function addGliders() {
     (map as any).__glidersDetach = detach;
     setSelectedGlider(map, mainStore.selectedGliderId);
     setGliderLayerVisibility(map, mainStore.showGliderLayer);
+    updateGliderCurtain();
 }
+
+// The selected glider's section, hung under its track when the map is tilted.
+const { rgbFn: fieldRgbFn } = useFieldColorRamp();
+let curtainSeq = 0;
+let curtainBottomM = 1000; // deepest cell of the curtain on show, for framing it
+async function updateGliderCurtain() {
+    const seq = ++curtainSeq;
+    const v = mainStore.selected_variable.var;
+    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
+    if (!map || !g || !g.variables.includes(v)) {
+        setGliderCurtain(map, null);
+        return;
+    }
+    try {
+        const s = await fetchGliderSection(g.id, v);
+        if (seq !== curtainSeq) return;
+        const deepest = s.values.findLastIndex(row => row.some(x => x != null));
+        if (deepest >= 0) curtainBottomM = s.depths[deepest]!;
+        setGliderCurtain(map, {
+            lon: s.lon,
+            lat: s.lat,
+            depths: s.depths,
+            values: s.values.map(row => row.map(x => x == null ? null : toDisplayValue(v, x))),
+            rgb: fieldRgbFn.value,
+        }, GLIDER_BASE_LAYER);
+        setGliderCurtainVisibility(map, mainStore.showGliderLayer);
+    } catch (e) {
+        console.warn('glider curtain failed:', e);
+    }
+}
+// fieldRgbFn changes identity with the palette, range and display unit.
+watch([() => mainStore.selectedGliderId, () => mainStore.selected_variable.var, fieldRgbFn], updateGliderCurtain);
+
+const GLIDER_TILT_PITCH = 60;
+
+/** Bearing that looks across the track's main axis, keeping north as near to up as possible. */
+function sideOnBearing(track: GliderDeployment['track']): number {
+    const k = Math.cos(track[0]![1] * Math.PI / 180);
+    const xs = track.map(p => p[0] * k);
+    const ys = track.map(p => p[1]);
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    let sxx = 0, syy = 0, sxy = 0;
+    xs.forEach((x, i) => {
+        const dx = x - mx, dy = ys[i]! - my;
+        sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+    });
+    // Principal axis as an azimuth (clockwise from north); face 90° off it.
+    const azimuth = 90 - (0.5 * Math.atan2(2 * sxy, sxx - syy)) * 180 / Math.PI;
+    const bearing = azimuth - 90;
+    return ((bearing + 90) % 180 + 180) % 180 - 90; // into [-90, 90)
+}
+
+// GliderSection's 3D button: tilt to see the selected track's curtain side-on,
+// or flatten (north up) if the map is already tilted.
+watch(() => mainStore.gliderTiltToken, () => {
+    if (!map) return;
+    if (map.getPitch() > 10) {
+        map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
+        return;
+    }
+    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
+    if (!g || g.track.length < 2) return;
+    const bearing = sideOnBearing(g.track);
+    // The curtain hangs toward the camera, so its bottom edge lands this far
+    // short of the track on screen: frame those points too.
+    const reachM = curtainBottomM * CURTAIN_EXAGGERATION * Math.tan(GLIDER_TILT_PITCH * Math.PI / 180);
+    const b = bearing * Math.PI / 180;
+    const bounds = new mapboxgl.LngLatBounds();
+    for (const [lon, lat] of g.track) {
+        bounds.extend([lon, lat]);
+        bounds.extend([
+            lon - Math.sin(b) * reachM / (111_320 * Math.cos(lat * Math.PI / 180)),
+            lat - Math.cos(b) * reachM / 111_320,
+        ]);
+    }
+    map.fitBounds(bounds, { bearing, pitch: GLIDER_TILT_PITCH, padding: 60, maxZoom: 10, duration: 1200 });
+});
 
 watch(() => mainStore.selectedGliderId, (id) => {
     setSelectedGlider(map, id);
@@ -1191,7 +1273,10 @@ watch(() => mainStore.selectedGliderId, (id) => {
     }
 });
 watch(() => mainStore.hoveredGliderId, (id) => setHoveredGlider(map, id));
-watch(() => mainStore.showGliderLayer, (visible: boolean) => setGliderLayerVisibility(map, visible));
+watch(() => mainStore.showGliderLayer, (visible: boolean) => {
+    setGliderLayerVisibility(map, visible);
+    setGliderCurtainVisibility(map, visible);
+});
 
 async function getSensors() {
     try {
