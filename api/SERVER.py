@@ -23,6 +23,7 @@ from modules.extractSensorTimeseries import extract_sensor_timeseries
 from modules.extract_depth_profile import extract_depth_profile
 from modules.extract_cross_section import extract_cross_section
 from modules.point_snapshot import extract_point_snapshot
+from modules.gliders import list_gliders, extract_glider_section
 from modules.extract_image import generate_image
 from modules.ocean_analysis import lookup_grid_cells_for_polygon, lookup_nearest_grid_cell, query_region_timeseries
 from modules.sync_hourly import import_native_file, import_daily_native_file, SyncConflict, SyncError, SYNC_API_TOKEN
@@ -223,6 +224,33 @@ async def get_sensors():
         return await run_in_threadpool(_fetch)
     except Exception as exc:
         logger.exception("get_sensors failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+#######################################
+
+@app.get("/gliders")
+async def get_gliders():
+    """C-PROOF glider deployments with one track point per profile."""
+    try:
+        return await run_in_threadpool(list_gliders)
+    except Exception as exc:
+        logger.exception("get_gliders failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class gliderSectionRequest(BaseModel):
+    deployment: str
+    var: str
+
+@app.post("/gliderSection")
+async def get_glider_section(request: gliderSectionRequest):
+    """One variable of one glider deployment as a depth x profile grid."""
+    try:
+        return await run_in_threadpool(extract_glider_section, request.deployment, request.var)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.exception("get_glider_section failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 #######################################

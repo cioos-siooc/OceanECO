@@ -96,6 +96,39 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- C-PROOF gliders: a deployment moves, so a row shows its
+                     mission window and distance flown instead of a depth. -->
+                <template v-if="mainStore.gliders.length">
+                    <div class="sgroup oe-label">Gliders · {{ mainStore.gliders.length }}</div>
+                    <div v-for="g in mainStore.gliders" :key="g.id"
+                        role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
+                        @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
+                        @mouseenter="mainStore.hoveredGliderId = g.id" @mouseleave="mainStore.hoveredGliderId = null">
+                        <span class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
+                            :title="g.active ? 'Live: on mission now' : 'Recovered'" />
+                        <span class="srow__name">{{ g.id }}</span>
+                        <span class="srow__depth oe-num">{{ Math.round(g.distanceKm) }} km</span>
+                        <span class="srow__sub oe-num">
+                            <span>C-PROOF</span>
+                            <span class="srow__vars">{{ g.variables.map(v => variableShort(v)).join(' ') }} · glider</span>
+                            <span class="srow__age">{{ gliderAge(g.end) }}</span>
+                        </span>
+                        <div v-if="g.id === mainStore.selectedGliderId" class="srow__detail" @click.stop>
+                            <div class="srow__kv">
+                                <span>Mission</span><span class="oe-num">{{ gliderRange(g) }}</span>
+                                <span>Profiles</span><span class="oe-num">{{ g.profiles }}</span>
+                                <span>Platform</span><span>{{ g.platformType }}<template v-if="g.station"> · from {{ g.station }}</template></span>
+                                <span>Data</span><span>{{ g.variant === 'grid' ? 'Real-time' : 'Delayed mode' }}, unscreened</span>
+                                <span v-if="g.summary">Notes</span><span v-if="g.summary">{{ g.summary }}</span>
+                            </div>
+                            <div class="srow__acts">
+                                <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
+                                    :to="`https://cproof.uvic.ca/gliderdata/deployments/${g.glider}/${g.id}/`" target="_blank">C-PROOF page</UButton>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </div>
         </template>
     </div>
@@ -116,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { useMainStore } from '@/stores/main';
+import { useMainStore, type GliderDeployment } from '@/stores/main';
 import { storeToRefs } from 'pinia';
 import { ref, computed, watch, nextTick, type ComponentPublicInstance } from 'vue';
 import { sensorIsRealtime } from '~~/composables/useSensorStatus';
@@ -268,6 +301,15 @@ function ageOf(sensor: Sensor): string {
     return new Date(sensor.latest_data_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'short' });
 }
 
+function gliderAge(iso: string): string {
+    return ageOf({ latest_data_at: iso } as Sensor);
+}
+
+function gliderRange(g: GliderDeployment): string {
+    const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+    return `${fmt(g.start)} – ${fmt(g.end)}`;
+}
+
 const depthDialogSensor = ref<typeof mainStore.sensors[number] | null>(null);
 const depthDialogOpen = computed({
     get: () => depthDialogSensor.value !== null,
@@ -354,6 +396,11 @@ function openInfoDialog(sensor: typeof mainStore.sensors[number]) {
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
+}
+
+.sgroup {
+    padding: 10px 14px 6px;
+    border-bottom: 1px solid var(--ui-border-muted);
 }
 
 .srow {

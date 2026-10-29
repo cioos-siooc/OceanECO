@@ -1,5 +1,7 @@
 <template>
   <div class="tdh-panel">
+    <!-- The hatch sits behind the plot area only, so axis labels stay on a plain ground. -->
+    <div class="tdh-plot" :style="plotInset" />
     <div ref="chartRef" class="tdh-chart" />
     <span v-if="label" class="tdh-label">{{ label }}</span>
   </div>
@@ -195,6 +197,11 @@ function repositionCrosshairs() {
 function gridConfig() {
   return { left: AXIS_LEFT_PX, right: DATAZOOM_RIGHT_PX, top: 6 }
 }
+
+const plotInset = computed(() => {
+  const g = gridConfig()
+  return { left: `${g.left}px`, right: `${g.right}px`, top: `${g.top}px`, bottom: `${props.showXAxis ? 20 : 6}px` }
+})
 
 function baseOption(): echarts.EChartsOption {
   return {
@@ -403,13 +410,18 @@ defineExpose({ resize })
   height: 100%;
   border-radius: 3px;
   background-color: #161e26;
-  /* Shows through empty cells (renderItem draws nothing for them) — same
-     pattern the consumers' legend swatches use, so unrendered cells and the
-     legend read as one thing. */
+}
+
+/* Shows through empty cells (renderItem draws nothing for them) — same
+   pattern the consumers' legend swatches use, so unrendered cells and the
+   legend read as one thing. */
+.tdh-plot {
+  position: absolute;
   background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.22) 0, rgba(255, 255, 255, 0.22) 1px, transparent 1px, transparent 6px);
 }
 
-.tdh-chart { width: 100%; height: 100%; cursor: crosshair; }
+/* Positioned so it paints over the hatch, which precedes it. */
+.tdh-chart { position: relative; width: 100%; height: 100%; cursor: crosshair; }
 
 .tdh-label {
   position: absolute; top: 5px; left: 7px;

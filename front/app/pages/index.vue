@@ -215,6 +215,7 @@ import { resolveColormap } from '~~/composables/useColormapResolver'
 import { MAP_BOUNDS, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_STYLE, BASEMAP_PAINT, BASEMAP_FILLS, BASEMAP_HIDDEN_SOURCE_LAYERS } from '@/config/app'
 import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
+import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, GLIDER_CLICK_LAYERS } from '~~/composables/useGliderLayer';
 import { addBuoyLayer, setBuoyLayerVisibility, setSelectedBuoy, setHoveredBuoy, SOURCE_ID, STATIONS_LAYER_ID, type MultiSensorCandidate } from '~~/composables/useBuoyLayer';
 import getSensorTimeseries from '~~/composables/useSensorTimeseries';
 import AnalysisWorkspace from '../components/AnalysisWorkspace.vue'
@@ -523,7 +524,9 @@ onMounted(async () => {
         });
         // Fetch colormaps and variables in parallel
         Promise.all([init()]).catch((e) => console.warn('init failed:', e));
-        addSensors().catch((e) => console.warn('addSensors failed:', e));
+        addSensors()
+            .catch((e) => console.warn('addSensors failed:', e))
+            .finally(() => addGliders().catch((e) => console.warn('addGliders failed:', e)));
 
         map?.on('zoom', () => {
             if (map) zoom.value = map.getZoom().toFixed(2);
@@ -1163,6 +1166,33 @@ function clickSensor(sensor_id: string, depth: number) {
 }
 
 
+async function addGliders() {
+    const r = await axios.get(`${apiBaseUrl}/gliders`);
+    mainStore.setGliders(r.data);
+    const detach = await addGliderLayer(map, r.data, (id) => {
+        mainStore.setSelectedSensor(null);
+        mainStore.selectGlider(id);
+    });
+    (map as any).__glidersDetach?.();
+    (map as any).__glidersDetach = detach;
+    setSelectedGlider(map, mainStore.selectedGliderId);
+    setGliderLayerVisibility(map, mainStore.showGliderLayer);
+}
+
+watch(() => mainStore.selectedGliderId, (id) => {
+    setSelectedGlider(map, id);
+    // Offshore tracks often sit outside the Salish Sea view: bring the whole track in.
+    const g = mainStore.gliders.find(d => d.id === id);
+    if (!g || !map) return;
+    const [w, s, e, n] = g.bbox;
+    const view = map.getBounds();
+    if (!view?.contains([w, s]) || !view.contains([e, n])) {
+        map.fitBounds([[w, s], [e, n]], { padding: 80, maxZoom: 10, duration: 800 });
+    }
+});
+watch(() => mainStore.hoveredGliderId, (id) => setHoveredGlider(map, id));
+watch(() => mainStore.showGliderLayer, (visible: boolean) => setGliderLayerVisibility(map, visible));
+
 async function getSensors() {
     try {
         const r = await axios.get(`${apiBaseUrl}/sensors`);
@@ -1372,6 +1402,10 @@ async function updatePngOverlay(sourceId = 'png-image', layerId = 'png-image-lay
             ? map.queryRenderedFeatures(evt.point, { layers: stationLayers })
             : [];
 
+        // Glider tracks/heads are handled by useGliderLayer's own click handler.
+        const gliderLayers = GLIDER_CLICK_LAYERS.filter(id => map.getLayer(id));
+        if (gliderLayers.length && map.queryRenderedFeatures(evt.point, { layers: gliderLayers }).length) return;
+
         if (features.length > 0) {
             // Sensor click is fully handled by useStationsInteraction → clickSensor.
             // Returning here prevents a duplicate getTimeseriesPromises call.
@@ -1379,6 +1413,7 @@ async function updatePngOverlay(sourceId = 'png-image', layerId = 'png-image-lay
         }
 
         mainStore.setSelectedSensor(null); // Clear selected sensor on map click
+        mainStore.selectGlider(null);
         sensorPicker.value.visible = false;
         mainStore.setLastClickedMapPoint({ lat, lng });
     };

@@ -1,7 +1,15 @@
 <template>
   <div class="model-depth-profile flex flex-col h-full p-3" ref="rootRef">
+    <!-- A glider deployment is its own record, not keyed off the map point. -->
+    <GliderSection v-if="viewMode === 'glider' && mainStore.selectedGliderId" :color-fn="seqColorFn">
+      <template #views>
+        <SegmentedControl :model-value="viewMode" :items="exploreSubViews" size="xs" aria-label="Explore view"
+          @update:model-value="(v) => mainStore.setExploreView(v as typeof viewMode.value)" />
+      </template>
+    </GliderSection>
+
     <!-- No point picked yet — the whole view is keyed off one map coordinate. -->
-    <div v-if="!point" class="flex flex-col items-center justify-center grow text-center px-6">
+    <div v-else-if="!point" class="flex flex-col items-center justify-center grow text-center px-6">
       <UIcon name="i-mdi-layers-search" class="size-[56px] text-gray-500" />
       <div class="text-gray-500 mt-2">
         Click a point on the map to see its full water-column section over time.
@@ -151,6 +159,7 @@ import TimeseriesChart from './TimeseriesChart.vue'
 import TimeControls from './TimeControls.vue'
 import ChartContextBar, { type ContextItem } from './ChartContextBar.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
+import GliderSection from './glider/GliderSection.vue'
 import { toCalendarDate, fromCalendarDate } from '~~/composables/useCalendarDate'
 
 /**
@@ -402,12 +411,13 @@ const exploreSubViews = computed(() => {
       value: 'sensor-depth', label: 'Sensor depth', disabled: !hasProfiler,
       title: hasProfiler ? "The sensor's own depth section" : 'Select a profiling sensor first',
     },
+    ...(mainStore.selectedGliderId ? [{ value: 'glider', label: 'Glider', title: 'The selected glider deployment along its track' }] : []),
   ]
 })
 // Losing the profiler strands sensor-depth with nothing to draw.
 watch(hasSensorGrid, (has) => { if (!has && viewMode.value === 'sensor-depth') mainStore.setExploreView('model-depth') })
 
-const showSection = computed(() => viewMode.value !== 'series')
+const showSection = computed(() => viewMode.value === 'model-depth' || viewMode.value === 'sensor-depth')
 const showingSensor = computed(() => viewMode.value === 'sensor-depth' && hasSensorGrid.value)
 const activeGrid = computed(() => showingSensor.value ? sensorGrid.value! : grid.value)
 // The panel only gets the levels down to the deepest one with data, so a shallow

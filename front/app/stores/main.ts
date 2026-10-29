@@ -5,6 +5,28 @@ import { trackEvent } from '~~/composables/useAnalytics';
 
 // Depths are plain numbers (the WebP filename stem too, e.g. 18.0 -> "18.0.webp")
 // — -1 is the synthetic bottom-layer sentinel ("bottom.webp").
+export type ExploreView = 'series' | 'model-depth' | 'sensor-depth' | 'glider'
+
+/** One C-PROOF glider deployment, as `GET /gliders` returns it. */
+export interface GliderDeployment {
+    id: string
+    glider: string
+    platformType: string
+    summary: string
+    station: string
+    start: string
+    end: string
+    bbox: [number, number, number, number]
+    profiles: number
+    distanceKm: number
+    variables: string[]
+    fileUrl: string
+    variant: string
+    active: boolean
+    /** [lon, lat, isoTime, profile] per profile, in profile order. */
+    track: [number, number, string, number][]
+}
+
 export function formatDepthLabel(depth: number): string {
     return depth === -1 ? 'bottom' : depth.toFixed(1);
 }
@@ -67,6 +89,13 @@ function createInitialState() {
         selectedSensor: {} as { id: string, depth: number } | null,
         // Sensor under the pointer in the sensor list; the map highlights its marker.
         hoveredSensorId: null as string | null,
+
+        // C-PROOF glider deployments (`GET /gliders`). Kept apart from `sensors`:
+        // a deployment moves, so it has a track rather than one position.
+        gliders: [] as GliderDeployment[],
+        selectedGliderId: null as string | null,
+        hoveredGliderId: null as string | null,
+        showGliderLayer: true,
 
         // Sensor panel filters — shared with the map so markers stay in sync with the sensor list.
         sensorSearchQuery: '' as string,
@@ -138,7 +167,7 @@ function createInitialState() {
         // or a full-water-column section for the model or a profiler sensor.
         // Lives in the store (not a local ExplorePanel ref) because the footer's
         // nav rail in index.vue is what drives it now, one level up from the panel.
-        exploreView: 'series' as 'series' | 'model-depth' | 'sensor-depth',
+        exploreView: 'series' as ExploreView,
 
         // Explore's time-depth window anchor (`useTimeDepthWindow`'s `windowEnd`),
         // mirrored out of the panel purely so a share link can carry "which
@@ -303,6 +332,24 @@ export const useMainStore = defineStore('main', {
         },
         setSelectedSensor(sensor: { id: string, depth: number } | null) {
             this.selectedSensor = sensor;
+            // One observation selected at a time: a sensor replaces the glider.
+            if (sensor && this.selectedGliderId) this.selectGlider(null);
+        },
+        setGliders(gliders: GliderDeployment[]) {
+            this.gliders = gliders;
+        },
+        /** Select a glider deployment (or clear with null) and show its section. */
+        selectGlider(id: string | null) {
+            if (id && id !== this.selectedGliderId) trackEvent('glider_selected', { deployment: id });
+            this.selectedGliderId = id;
+            if (id) {
+                this.setExploreView('glider');
+                if (this.activeBottomTab !== 'explore') this.setActiveBottomTab('explore');
+            }
+            else if (this.exploreView === 'glider') this.setExploreView('series');
+        },
+        setShowGliderLayer(value: boolean) {
+            this.showGliderLayer = value;
         },
         setSensorSearchQuery(query: string) {
             this.sensorSearchQuery = query;
@@ -432,7 +479,7 @@ export const useMainStore = defineStore('main', {
             this.analysisSource = source;
         },
 
-        setExploreView(view: 'series' | 'model-depth' | 'sensor-depth') {
+        setExploreView(view: ExploreView) {
             if (view !== this.exploreView) {
                 trackEvent('explore_view_changed', { view });
             }

@@ -302,7 +302,48 @@ CREATE TABLE IF NOT EXISTS default.sensors
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;
 
-""" + TIMESERIES_DDL.format(name="default.sensor_timeseries") + ";"
+""" + TIMESERIES_DDL.format(name="default.sensor_timeseries") + """;
+
+-- C-PROOF gliders (cproof_to_ch.py). A deployment moves, so it gets its own
+-- tables rather than a `sensors` row with one position: every profile carries
+-- its own fix. A harvest replaces the deployment's profiles wholesale.
+CREATE TABLE IF NOT EXISTS default.glider_deployments
+(
+    deployment_id  String,
+    glider         String,
+    platform_type  String,
+    summary        String,
+    station        String,
+    start_time     DateTime,
+    end_time       DateTime,
+    lat_min        Float64,
+    lat_max        Float64,
+    lon_min        Float64,
+    lon_max        Float64,
+    profiles       UInt32,
+    file_url       String,
+    variant        LowCardinality(String),
+    etag           String,
+    active         UInt8,
+    updated_at     DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY deployment_id;
+
+CREATE TABLE IF NOT EXISTS default.glider_profiles
+(
+    deployment_id  LowCardinality(String),
+    profile        UInt32,
+    time           DateTime                  CODEC(DoubleDelta, ZSTD(4)),
+    latitude       Float64,
+    longitude      Float64,
+    variable       LowCardinality(String),
+    depth          Float32                   CODEC(Gorilla(4),  ZSTD(4)),
+    value          Float32                   CODEC(Gorilla(4),  ZSTD(4))
+)
+ENGINE = MergeTree
+ORDER BY (deployment_id, variable, profile, depth);
+"""
 
 
 def cmd_setup(ch_client, _args):
@@ -313,6 +354,8 @@ def cmd_setup(ch_client, _args):
     print("Tables created (or already exist):")
     print("  default.sensors")
     print("  default.sensor_timeseries")
+    print("  default.glider_deployments")
+    print("  default.glider_profiles")
     key = ch_client.query(
         "SELECT sorting_key FROM system.tables WHERE database = 'default' AND name = 'sensor_timeseries'"
     ).result_rows[0][0]
