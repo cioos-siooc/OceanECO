@@ -4,6 +4,9 @@ Two independent pipelines turn source elevation data into what the frontend rend
 read GeoTIFF as their common input format, so any new data source just needs to be converted
 to GeoTIFF first (see below).
 
+The glider curtain's 3D seafloor tiles are a third product, built from the same DEM
+by `seafloor_tiles.sh` with section 1's tiler — see [seafloor_tiles.md](seafloor_tiles.md).
+
 ## 1. Raster depth tiles (`cnvMaster_RGBcoded.py`)
 
 Produces the WebP XYZ tile pyramid served by the API at `GET /raster_tiles/{z}/{x}/{y}.webp`

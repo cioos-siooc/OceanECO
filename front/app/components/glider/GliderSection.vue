@@ -7,6 +7,14 @@
       <UButton size="xs" variant="outline" color="neutral" :class="tilted ? 'oe-on' : ''"
         :aria-pressed="tilted" title="Tilt the map onto this track to see the section hanging under it, or back to flat"
         @click="mainStore.toggleGliderTilt()">3D</UButton>
+      <UButton size="xs" variant="outline" color="neutral" :class="mainStore.showSeafloor ? 'oe-on' : ''"
+        :aria-pressed="mainStore.showSeafloor" title="Show the seafloor around the track when the map is tilted"
+        @click="mainStore.setShowSeafloor(!mainStore.showSeafloor)">Seafloor</UButton>
+      <UButton size="xs" variant="outline" color="neutral" :class="mainStore.showOtherGliders ? 'oe-on' : ''"
+        :aria-pressed="mainStore.showOtherGliders" title="Show the other glider tracks, faded, or only this one"
+        @click="mainStore.setShowOtherGliders(!mainStore.showOtherGliders)">Other tracks</UButton>
+      <UButton v-if="mainStore.gliderRange" size="xs" variant="ghost" color="neutral" icon="i-mdi-arrow-expand-horizontal"
+        title="Zoom back out to the whole deployment" @click="mainStore.setGliderRange(null)">Whole track</UButton>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
       <div class="grow" />
       <span v-if="glider" class="range-label oe-num">{{ glider.id }} · {{ rangeLabel }}</span>
@@ -27,11 +35,10 @@
     <template v-else>
       <ChartContextBar :items="contextItems" />
       <div class="hm-slot">
-        <!-- Keyed on the axis mode: the heatmap reads `xLabel` lazily and won't relabel on its own. -->
-        <TimeDepthHeatmap v-if="section" :key="xAxis" :label="`GLIDER · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
-          :depths="section.depths" :values="displayValues" :bin-count="section.profiles.length"
-          :color-fn="colorFn" :gridline-bins="gridlineBins" show-x-axis :x-label="xLabel"
-          :tooltip-formatter="cellTooltip" />
+        <GliderSectionChart v-if="overview" :key="glider!.id" :label="`GLIDER · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
+          :overview="overview" :detail="detail" :extent="section!.extent" :range="mainStore.gliderRange"
+          :rgb-fn="rgbFn" :x-label="xLabel" :tooltip-formatter="cellTooltip"
+          @range="mainStore.setGliderRange($event)" />
       </div>
     </template>
   </div>
@@ -41,22 +48,24 @@
 import { ref, computed, watch } from 'vue'
 import { useMainStore } from '~/stores/main'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
+import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
 import { fetchGliderSection, type GliderSectionResponse } from '~~/composables/useGliderSectionFetch'
-import TimeDepthHeatmap from '../depth/TimeDepthHeatmap.vue'
+import GliderSectionChart, { type SectionLayer } from './GliderSectionChart.vue'
 import ChartContextBar, { type ContextItem } from '../ChartContextBar.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 
 /**
- * One C-PROOF glider deployment as a depth x profile section. Every profile is
- * one column, so the x-axis is either its time or its distance along the
+ * One C-PROOF glider deployment as a depth x profile section. The x-axis runs
+ * over profile numbers, labelled with their time or their distance along the
  * track — the glider moves, which is why this isn't Explore's time-binned view.
- * Colours follow the map's colorbar for the selected field (`colorFn`, in the
- * display unit).
+ * The whole deployment comes averaged to panel resolution; zooming in (the
+ * x slider, or the wheel) asks again for just the window, down to single
+ * profiles, and the map highlights that stretch of the track. Colours follow
+ * the map's colorbar for the selected field.
  */
-defineProps<{ colorFn: (v: number) => string }>()
-
 const mainStore = useMainStore()
 const { variableLabel, toDisplayValue, formatDisplayValue } = useVariableRegistry()
+const { rgbFn } = useFieldColorRamp()
 const glider = computed(() => mainStore.gliders.find(g => g.id === mainStore.selectedGliderId) ?? null)
 const varId = computed(() => mainStore.selected_variable.var)
 const gliderHasVar = computed(() => !!glider.value?.variables.includes(varId.value))
@@ -70,6 +79,7 @@ const xAxisItems = [
 ]
 
 const section = ref<GliderSectionResponse | null>(null)
+const detailSection = ref<GliderSectionResponse | null>(null)
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 
@@ -90,44 +100,100 @@ watch([() => glider.value?.id, varId], async ([id, v]) => {
   }
 }, { immediate: true })
 
-const displayValues = computed(() =>
-  section.value?.values.map(row => row.map(v => v == null ? null : toDisplayValue(varId.value, v))) ?? [])
+// The zoomed window at finer resolution; the overview fills in until it lands.
+// Not needed when the overview is already one profile per column.
+let detailSeq = 0
+watch([section, () => mainStore.gliderRange], async ([s, range]) => {
+  const seq = ++detailSeq
+  if (!s || !range || s.perColumn === 1) { detailSection.value = null; return }
+  try {
+    const data = await fetchGliderSection(glider.value!.id, varId.value, range)
+    if (seq === detailSeq) detailSection.value = data
+  } catch (e) {
+    console.warn('glider section window failed:', e)
+  }
+}, { immediate: true })
 
-const gridlineBins = computed(() => Math.max(1, Math.round((section.value?.profiles.length ?? 1) / 8)))
+function toLayer(s: GliderSectionResponse): SectionLayer {
+  return {
+    profiles: s.profiles,
+    profileEnd: s.profileEnd,
+    depths: s.depths,
+    values: s.values.map(row => row.map(v => v == null ? null : toDisplayValue(varId.value, v))),
+  }
+}
+const overview = computed(() => section.value ? toLayer(section.value) : null)
+const detail = computed(() => detailSection.value ? toLayer(detailSection.value) : null)
+
+/** The response a layer came from, for its columns' times and positions. */
+const sourceOf = (layer: SectionLayer) => layer === detail.value ? detailSection.value! : section.value!
+
+/** The finest column covering profile number `p` (clamped to the ends). */
+function columnAt(p: number): { s: GliderSectionResponse, i: number } | null {
+  const d = detailSection.value
+  const s = d && p >= d.profiles[0]! && p <= d.profileEnd[d.profileEnd.length - 1]! ? d : section.value
+  if (!s) return null
+  let i = s.profiles.findIndex(start => start > p) - 1
+  if (i < 0) i = p < s.profiles[0]! ? 0 : s.profiles.length - 1
+  return { s, i }
+}
 
 const fmtDate = (iso: string, withTime = false) => new Date(iso).toLocaleString('en-US', {
   month: 'short', day: 'numeric', timeZone: 'UTC',
   ...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
 })
 
-const rangeLabel = computed(() => glider.value ? `${fmtDate(glider.value.start)} – ${fmtDate(glider.value.end)}` : '')
-
-function xLabel(binIdx: number) {
+/** Times at the ends of the zoom window (the whole deployment when not zoomed). */
+const windowTimes = computed(() => {
   const s = section.value
-  const i = Math.round(binIdx)
-  if (!s || s.time[i] == null) return ''
-  if (xAxis.value === 'distance') return `${Math.round(s.distanceKm[i]!)} km`
-  // A short mission puts several gridlines in one day, so give them the hour.
-  const spanDays = (Date.parse(s.time[s.time.length - 1]!) - Date.parse(s.time[0]!)) / 86_400_000
-  return spanDays < 14 ? `${fmtDate(s.time[i]!, true)}` : fmtDate(s.time[i]!)
-}
+  if (!s) return null
+  const r = mainStore.gliderRange ?? s.extent
+  const a = columnAt(r[0]), b = columnAt(r[1])
+  return a && b ? [a.s.time[a.i]!, b.s.time[b.i]!] as const : null
+})
 
-function cellTooltip(binIdx: number, depthIdx: number, value: number | null): string {
-  const s = section.value
-  if (!s) return ''
-  const depth = s.depths[depthIdx]
+const rangeLabel = computed(() => {
+  const t = windowTimes.value
+  return t ? `${fmtDate(t[0])} – ${fmtDate(t[1])}` : ''
+})
+
+// A new function per axis mode / window, so the chart relabels.
+const xLabel = computed(() => {
+  const mode = xAxis.value
+  const t = windowTimes.value
+  // Profiles come unevenly in time, so a few weeks' window can already put
+  // two labels on one day: give them the hour.
+  const withTime = !!t && Date.parse(t[1]) - Date.parse(t[0]) < 45 * 86_400_000
+  return (p: number) => {
+    const c = columnAt(p)
+    if (!c) return ''
+    return mode === 'distance' ? `${Math.round(c.s.distanceKm[c.i]!)} km` : fmtDate(c.s.time[c.i]!, withTime)
+  }
+})
+
+function cellTooltip(layer: SectionLayer, col: number, row: number, value: number | null): string {
+  const s = sourceOf(layer)
+  const step = s.depths.length > 1 ? s.depths[1]! - s.depths[0]! : 1
+  const d = s.depths[row]!
+  const depth = step > 1.5 ? `${Math.max(0, d - step / 2).toFixed(0)}–${(d + step / 2).toFixed(0)} m` : `${d.toFixed(0)} m`
+  const p0 = s.profiles[col]!, p1 = s.profileEnd[col]!
+  const profiles = p1 > p0 ? `profiles ${p0}–${p1}, averaged` : `profile ${p0}`
   const valueStr = value == null ? 'no data' : formatDisplayValue(varId.value, value, { unit: true })
-  return `<div style="opacity:.7;margin-bottom:2px;">${fmtDate(s.time[binIdx]!, true)} UTC &middot; ${depth?.toFixed(0)} m</div>`
-    + `<div style="opacity:.7;margin-bottom:2px;">${s.lat[binIdx]!.toFixed(3)}°N ${Math.abs(s.lon[binIdx]!).toFixed(3)}°W &middot; ${s.distanceKm[binIdx]!.toFixed(1)} km along track</div>`
+  return `<div style="opacity:.7;margin-bottom:2px;">${fmtDate(s.time[col]!, true)} UTC &middot; ${depth}</div>`
+    + `<div style="opacity:.7;margin-bottom:2px;">${s.lat[col]!.toFixed(3)}°N ${Math.abs(s.lon[col]!).toFixed(3)}°W &middot; ${s.distanceKm[col]!.toFixed(1)} km along track &middot; ${profiles}</div>`
     + `<div>${variableLabel(varId.value)}: <b>${valueStr}</b></div>`
 }
 
 const contextItems = computed<ContextItem[]>(() => {
   const g = glider.value
   if (!g) return []
+  const s = detailSection.value ?? section.value
+  const step = s && s.depths.length > 1 ? Math.round(s.depths[1]! - s.depths[0]!) : 1
+  const averaged = s && (s.perColumn > 1 || step > 1)
   return [
     { label: 'Field', value: variableLabel(varId.value) },
     { label: 'Glider', value: `${g.id} · ${g.profiles} profiles · ${Math.round(g.distanceKm)} km` },
+    ...(averaged ? [{ label: 'Cell', value: `${s!.perColumn} profile${s!.perColumn > 1 ? 's' : ''} × ${step} m, averaged`, tone: 'muted' as const }] : []),
     { label: 'Data', value: g.variant === 'grid' ? 'C-PROOF real-time, unscreened' : 'C-PROOF delayed mode', tone: 'muted' },
   ]
 })

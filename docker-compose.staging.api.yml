@@ -29,6 +29,8 @@ services:
       - SSC_NC_DIR=${SSC_NC_DIR:-/opt/data/SSC/nc}
       - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
       - VECTOR_ROOT=${VECTOR_ROOT:-/opt/data/bathymetry/NONNA/tiles}
+      # Seafloor depth tiles for the glider curtain (GET /seafloor/{z}/{x}/{y}.webp).
+      - SEAFLOOR_TILES_ROOT=${SEAFLOOR_TILES_ROOT:-/opt/data/bathymetry/seafloor_tiles}
       # prod's db-ch, resolved over PROD_NETWORK
       - CH_HOST=${CH_HOST:-db-ch}
       - CH_PORT=${CH_PORT:-8123}

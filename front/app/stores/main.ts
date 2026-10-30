@@ -23,8 +23,8 @@ export interface GliderDeployment {
     fileUrl: string
     variant: string
     active: boolean
-    /** [lon, lat, isoTime, profile] per profile, in profile order. */
-    track: [number, number, string, number][]
+    /** [lon, lat], simplified to the track's shape. */
+    track: [number, number][]
 }
 
 export function formatDepthLabel(depth: number): string {
@@ -95,10 +95,18 @@ function createInitialState() {
         gliders: [] as GliderDeployment[],
         selectedGliderId: null as string | null,
         hoveredGliderId: null as string | null,
+        // Profile-number window [first, last] the glider section is zoomed to;
+        // null = the whole deployment. The map highlights that stretch of the
+        // track and the curtain shows only it.
+        gliderRange: null as [number, number] | null,
         showGliderLayer: true,
         // Bumped by GliderSection's 3D button: index.vue (which holds the map)
         // tilts onto the selected track, or flattens the map if already tilted.
         gliderTiltToken: 0,
+        // 3D seafloor under the curtain (useGliderCurtain.ts).
+        showSeafloor: true,
+        // With a glider selected, the other tracks are faded; false hides them.
+        showOtherGliders: true,
 
         // Sensor panel filters — shared with the map so markers stay in sync with the sensor list.
         sensorSearchQuery: '' as string,
@@ -344,6 +352,7 @@ export const useMainStore = defineStore('main', {
         /** Select a glider deployment (or clear with null) and show its section. */
         selectGlider(id: string | null) {
             if (id && id !== this.selectedGliderId) trackEvent('glider_selected', { deployment: id });
+            if (id !== this.selectedGliderId) this.gliderRange = null;
             this.selectedGliderId = id;
             if (id) {
                 this.setExploreView('glider');
@@ -351,11 +360,20 @@ export const useMainStore = defineStore('main', {
             }
             else if (this.exploreView === 'glider') this.setExploreView('series');
         },
+        setGliderRange(range: [number, number] | null) {
+            this.gliderRange = range;
+        },
         setShowGliderLayer(value: boolean) {
             this.showGliderLayer = value;
         },
         toggleGliderTilt() {
             this.gliderTiltToken++;
+        },
+        setShowSeafloor(value: boolean) {
+            this.showSeafloor = value;
+        },
+        setShowOtherGliders(value: boolean) {
+            this.showOtherGliders = value;
         },
         setSensorSearchQuery(query: string) {
             this.sensorSearchQuery = query;

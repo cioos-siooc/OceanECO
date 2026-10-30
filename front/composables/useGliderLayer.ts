@@ -13,15 +13,23 @@ const ACCENT = '#e2a336';
 
 const SOURCE_TRACKS = 'glider-tracks';
 const SOURCE_HEADS = 'glider-heads';
+const SOURCE_RANGE = 'glider-range';
 const LAYER_TRACK_CASING = 'glider-track-casing';
 const LAYER_TRACK = 'glider-track';
 const LAYER_TRACK_SELECTED = 'glider-track-selected';
 const LAYER_TRACK_HOVER = 'glider-track-hover';
+const LAYER_TRACK_RANGE = 'glider-track-range';
 const LAYER_HEAD = 'glider-head';
 export const GLIDER_CLICK_LAYERS = [LAYER_TRACK, LAYER_HEAD];
 /** Bottom-most glider layer, for slotting the depth curtain under the tracks. */
 export const GLIDER_BASE_LAYER = LAYER_TRACK_CASING;
-const GLIDER_LAYER_IDS = [LAYER_TRACK_CASING, LAYER_TRACK, LAYER_TRACK_SELECTED, LAYER_TRACK_HOVER, LAYER_HEAD];
+const GLIDER_LAYER_IDS = [LAYER_TRACK_CASING, LAYER_TRACK, LAYER_TRACK_SELECTED, LAYER_TRACK_HOVER, LAYER_TRACK_RANGE, LAYER_HEAD];
+const SELECTED_OPACITY = 1;
+// The rest of the selected track, while its section is zoomed to a stretch of it.
+const SELECTED_DIMMED_OPACITY = 0.35;
+// The other deployments' tracks and heads while one is selected.
+const OTHERS_OPACITY = 0.1;
+const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 const IMG = { live: 'glider-live', historic: 'glider-historic' } as const;
 const NONE = ['==', ['get', 'id'], '__none__'];
@@ -91,6 +99,7 @@ export async function addGliderLayer(
     } else {
         map.addSource(SOURCE_TRACKS, { type: 'geojson', data: tracks });
         map.addSource(SOURCE_HEADS, { type: 'geojson', data: heads });
+        map.addSource(SOURCE_RANGE, { type: 'geojson', data: EMPTY });
         // Below the sensor markers when they exist, so a mooring on a track stays clickable.
         const before = map.getLayer('stations-selected') ? 'stations-selected' : undefined;
         map.addLayer({
@@ -114,7 +123,12 @@ export async function addGliderLayer(
         map.addLayer({
             id: LAYER_TRACK_SELECTED, type: 'line', source: SOURCE_TRACKS, filter: NONE,
             layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': ACCENT, 'line-width': 3 },
+            paint: { 'line-color': ACCENT, 'line-width': 3, 'line-opacity': SELECTED_OPACITY },
+        }, before);
+        map.addLayer({
+            id: LAYER_TRACK_RANGE, type: 'line', source: SOURCE_RANGE,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': ACCENT, 'line-width': 4.5 },
         }, before);
         map.addLayer({
             id: LAYER_HEAD, type: 'symbol', source: SOURCE_HEADS,
@@ -154,12 +168,36 @@ export function setGliderLayerVisibility(map: any, visible: boolean) {
     }
 }
 
-/** Highlight the selected deployment's track (or clear with null). */
-export function setSelectedGlider(map: any, id: string | null) {
-    if (map?.getLayer(LAYER_TRACK_SELECTED)) map.setFilter(LAYER_TRACK_SELECTED, id ? ['==', ['get', 'id'], id] : NONE);
+/**
+ * Highlight the selected deployment's track (or clear with null) and fade the
+ * others, or hide them altogether when `hideOthers`.
+ */
+export function setSelectedGlider(map: any, id: string | null, hideOthers = false) {
+    if (!map?.getLayer(LAYER_TRACK_SELECTED)) return;
+    const isSelected = ['==', ['get', 'id'], id ?? '__none__'];
+    const opacity = id ? ['case', isSelected, 1, OTHERS_OPACITY] : 1;
+    const filter = id && hideOthers ? isSelected : null;
+    map.setFilter(LAYER_TRACK_SELECTED, id ? isSelected : NONE);
+    for (const layer of [LAYER_TRACK_CASING, LAYER_TRACK, LAYER_HEAD]) map.setFilter(layer, filter);
+    map.setPaintProperty(LAYER_TRACK_CASING, 'line-opacity', opacity);
+    map.setPaintProperty(LAYER_TRACK, 'line-opacity', opacity);
+    map.setPaintProperty(LAYER_HEAD, 'icon-opacity', opacity);
 }
 
 /** Glow the hovered deployment's track (or clear with null). */
 export function setHoveredGlider(map: any, id: string | null) {
     if (map?.getLayer(LAYER_TRACK_HOVER)) map.setFilter(LAYER_TRACK_HOVER, id ? ['==', ['get', 'id'], id] : NONE);
+}
+
+/**
+ * Highlight the stretch of the selected track its section is zoomed to, and dim
+ * the rest of it; null restores the whole track.
+ */
+export function setGliderRangeTrack(map: any, coords: [number, number][] | null) {
+    const src = map?.getSource(SOURCE_RANGE);
+    if (!src) return;
+    src.setData(coords && coords.length > 1
+        ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }
+        : EMPTY);
+    map.setPaintProperty(LAYER_TRACK_SELECTED, 'line-opacity', coords ? SELECTED_DIMMED_OPACITY : SELECTED_OPACITY);
 }

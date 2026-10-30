@@ -7,7 +7,7 @@
     <div
       ref="mapContainer"
       class="grow"
-      :style="{ position: 'relative', height: `calc(100% - ${footerHeight})` }"
+      :style="{ position: 'relative', height: `calc(100% - ${footerHeight})`, '--nav-ctrl-right': (drawerOpen ? 300 : 0) + 'px' }"
     >
       <!-- <Layers @toggleLayer="onToggleLayer" /> -->
 
@@ -215,8 +215,9 @@ import { resolveColormap } from '~~/composables/useColormapResolver'
 import { MAP_BOUNDS, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_STYLE, BASEMAP_PAINT, BASEMAP_FILLS, BASEMAP_HIDDEN_SOURCE_LAYERS } from '@/config/app'
 import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
-import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
-import { setGliderCurtain, setGliderCurtainVisibility, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
+import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
+import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
+import { fetchSeafloorGrid } from '~~/composables/useSeafloorGrid';
 import { fetchGliderSection } from '~~/composables/useGliderSectionFetch';
 import { useFieldColorRamp } from '~~/composables/useFieldColorRamp';
 import { addBuoyLayer, setBuoyLayerVisibility, setSelectedBuoy, setHoveredBuoy, SOURCE_ID, STATIONS_LAYER_ID, type MultiSensorCandidate } from '~~/composables/useBuoyLayer';
@@ -499,6 +500,9 @@ onMounted(async () => {
         preserveDrawingBuffer: true, // needed for exporting canvas
     });
     console.log(map);
+
+    // Zoom in/out plus a compass that resets bearing and pitch to north-up.
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
 
     // When the map finishes loading the style, add the PNG overlay and chart
     map.on('load', () => {
@@ -1178,28 +1182,37 @@ async function addGliders() {
     });
     (map as any).__glidersDetach?.();
     (map as any).__glidersDetach = detach;
-    setSelectedGlider(map, mainStore.selectedGliderId);
+    setSelectedGlider(map, mainStore.selectedGliderId, !mainStore.showOtherGliders);
     setGliderLayerVisibility(map, mainStore.showGliderLayer);
     updateGliderCurtain();
+    updateGliderSeafloor();
 }
 
-// The selected glider's section, hung under its track when the map is tilted.
+// The selected glider's section, hung under its track when the map is tilted:
+// the whole deployment, or the stretch its Explore section is zoomed to, which
+// the track highlights too.
 const { rgbFn: fieldRgbFn } = useFieldColorRamp();
 let curtainSeq = 0;
 let curtainBottomM = 1000; // deepest cell of the curtain on show, for framing it
+let curtainTrack: [number, number][] = []; // its columns' positions, for framing it
 async function updateGliderCurtain() {
     const seq = ++curtainSeq;
     const v = mainStore.selected_variable.var;
+    const range = mainStore.gliderRange;
     const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
     if (!map || !g || !g.variables.includes(v)) {
         setGliderCurtain(map, null);
+        setGliderRangeTrack(map, null);
+        curtainTrack = [];
         return;
     }
     try {
-        const s = await fetchGliderSection(g.id, v);
+        const s = await fetchGliderSection(g.id, v, range);
         if (seq !== curtainSeq) return;
         const deepest = s.values.findLastIndex(row => row.some(x => x != null));
         if (deepest >= 0) curtainBottomM = s.depths[deepest]!;
+        curtainTrack = s.lon.map((lon, i) => [lon, s.lat[i]!]);
+        setGliderRangeTrack(map, range ? curtainTrack : null);
         setGliderCurtain(map, {
             lon: s.lon,
             lat: s.lat,
@@ -1213,7 +1226,33 @@ async function updateGliderCurtain() {
     }
 }
 // fieldRgbFn changes identity with the palette, range and display unit.
-watch([() => mainStore.selectedGliderId, () => mainStore.selected_variable.var, fieldRgbFn], updateGliderCurtain);
+watch([() => mainStore.selectedGliderId, () => mainStore.selected_variable.var, () => mainStore.gliderRange, fieldRgbFn], updateGliderCurtain);
+
+// The seafloor around the selected track, under the curtain: always the whole
+// deployment's area, so zooming the section doesn't reshape the terrain.
+let seafloorSeq = 0;
+let seafloorDeepestM = 0;
+async function updateGliderSeafloor() {
+    const seq = ++seafloorSeq;
+    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
+    seafloorDeepestM = 0;
+    if (!map || !g) {
+        setGliderSeafloor(map, null);
+        return;
+    }
+    try {
+        const grid = await fetchSeafloorGrid(g.bbox);
+        if (seq !== seafloorSeq) return;
+        seafloorDeepestM = grid.depth.reduce((a, d) => (d > a ? d : a), 0);
+        setGliderSeafloor(map, grid, GLIDER_BASE_LAYER);
+        setGliderCurtainVisibility(map, mainStore.showGliderLayer);
+        setGliderSeafloorVisibility(map, mainStore.showSeafloor);
+    } catch (e) {
+        console.warn('glider seafloor failed:', e);
+    }
+}
+watch(() => mainStore.selectedGliderId, updateGliderSeafloor);
+watch(() => mainStore.showSeafloor, (v: boolean) => setGliderSeafloorVisibility(map, v));
 
 const GLIDER_TILT_PITCH = 60;
 
@@ -1244,14 +1283,17 @@ watch(() => mainStore.gliderTiltToken, () => {
         return;
     }
     const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
-    if (!g || g.track.length < 2) return;
-    const bearing = sideOnBearing(g.track);
+    // The curtain on show: the zoomed stretch when there is one.
+    const track = curtainTrack.length > 1 ? curtainTrack : g?.track ?? [];
+    if (track.length < 2) return;
+    const bearing = sideOnBearing(track);
     // The curtain hangs toward the camera, so its bottom edge lands this far
     // short of the track on screen: frame those points too.
-    const reachM = curtainBottomM * CURTAIN_EXAGGERATION * Math.tan(GLIDER_TILT_PITCH * Math.PI / 180);
+    const deepestM = mainStore.showSeafloor ? Math.max(curtainBottomM, seafloorDeepestM) : curtainBottomM;
+    const reachM = deepestM * CURTAIN_EXAGGERATION * Math.tan(GLIDER_TILT_PITCH * Math.PI / 180);
     const b = bearing * Math.PI / 180;
     const bounds = new mapboxgl.LngLatBounds();
-    for (const [lon, lat] of g.track) {
+    for (const [lon, lat] of track) {
         bounds.extend([lon, lat]);
         bounds.extend([
             lon - Math.sin(b) * reachM / (111_320 * Math.cos(lat * Math.PI / 180)),
@@ -1261,8 +1303,9 @@ watch(() => mainStore.gliderTiltToken, () => {
     map.fitBounds(bounds, { bearing, pitch: GLIDER_TILT_PITCH, padding: 60, maxZoom: 10, duration: 1200 });
 });
 
+watch(() => mainStore.showOtherGliders, (show: boolean) => setSelectedGlider(map, mainStore.selectedGliderId, !show));
 watch(() => mainStore.selectedGliderId, (id) => {
-    setSelectedGlider(map, id);
+    setSelectedGlider(map, id, !mainStore.showOtherGliders);
     // Offshore tracks often sit outside the Salish Sea view: bring the whole track in.
     const g = mainStore.gliders.find(d => d.id === id);
     if (!g || !map) return;
@@ -2061,6 +2104,37 @@ watch(() => mainStore.crossSectionRedrawToken, () => {
 .mapboxgl-ctrl-bottom-left .mapboxgl-ctrl-logo {
   transform: scale(0.5) translateY(1px) !important;
   transform-origin: left center !important;
+}
+
+/* Zoom/compass control: dark to match the map toolbar, slides left with the drawer. */
+.mapboxgl-ctrl-top-right {
+  right: var(--nav-ctrl-right, 0);
+  transition: right 0.3s ease;
+}
+
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-group {
+  margin: 8px 8px 0 0;
+  border-radius: 0;
+  background: rgba(19, 22, 26, 0.94);
+  border: 1px solid var(--ui-border);
+  box-shadow: none;
+}
+
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-group button {
+  width: 30px;
+  height: 28px;
+}
+
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-group button + button {
+  border-top: 1px solid var(--ui-border);
+}
+
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-group button:not(:disabled):hover {
+  background: var(--ui-bg-elevated);
+}
+
+.mapboxgl-ctrl-top-right .mapboxgl-ctrl-icon {
+  filter: invert(0.85);
 }
 
 /* make sure the controls remain clickable when scaled */

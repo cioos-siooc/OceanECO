@@ -9,6 +9,7 @@
             collaboration with the Department of Fisheries and Oceans, compiles the best data available from
             multiple government agencies into a seamless regional model gridded at 10 meter spacing, covering both
             marine bathymetric and adjacent terrestrial topographic areas.</p>
+        <p>It shapes the depth contours and the seafloor under a tilted glider section.</p>
     </div>
 </template>
 <style scoped>

@@ -1,7 +1,7 @@
 <template>
   <div class="model-depth-profile flex flex-col h-full p-3" ref="rootRef">
     <!-- A glider deployment is its own record, not keyed off the map point. -->
-    <GliderSection v-if="viewMode === 'glider' && mainStore.selectedGliderId" :color-fn="seqColorFn">
+    <GliderSection v-if="viewMode === 'glider' && mainStore.selectedGliderId">
       <template #views>
         <SegmentedControl :model-value="viewMode" :items="exploreSubViews" size="xs" aria-label="Explore view"
           @update:model-value="(v) => mainStore.setExploreView(v as typeof viewMode.value)" />

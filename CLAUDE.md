@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository. Area details live in `docs/claude/`; read the relevant file before working there:
+- `docs/claude/backend.md`: API endpoints, out-of-domain errors, process pipeline and Prefect, sensors, gliders
+- `docs/claude/frontend.md`: theme, UI, chart, CSV and share-link conventions, feature map, analytics
 
 ## Services & Ports
 
@@ -39,111 +41,20 @@ python -m SSC.cli {check|download|compute|image|ingest|sync|run|status} [--date 
 # check: [--init-days N]; download/image: [--variable VAR]; run = all steps in order
 ```
 
-## Architecture
+## Architecture in brief
+- **Data:** SalishSeaCast only (daily NetCDF from ERDDAP, curvilinear sigma grid). LiveOcean was removed.
+- **Storage** (`/opt/data/` in containers = `./data/` locally): `SalishSeaCast/nc/` raw NetCDF; `SalishSeaCast/images/` WebP tiles; `sensors/{id}/{sensorCategoryCode}.nc`; `cache/oa_grid_cache.npz` (grid, populated from `grid_SSC` on first use); `bathymetry/seafloor_tiles/` (seafloor tiles, built by `scripts/seafloor_tiles.sh`; `bathymetry/seafloor_src/` holds its downloads).
+- **ClickHouse** (`db-ch`) is the sole database, and the API never reads NetCDF. Variable metadata lives in `shared/variable_config.yml` and `shared/colormaps.json`, not in a table.
+- **Pipeline:** `process/SSC/cli.py`; each row in `SalishSeaCast_status` moves through download → compute → image → ingest → sync. Don't start a manual `SSC.cli run` while a scheduled one is in progress.
+- **Frontend:** Nuxt 4, Nuxt UI v4 (Tailwind v4, Reka UI) and Pinia, dark mode only. Vuetify is gone, so don't reintroduce `v-*` components.
 
-**Data source:** SalishSeaCast (SSC) only — daily NetCDF from ERDDAP (`salishsea.eos.ubc.ca/erddap`), curvilinear sigma-coordinate grid. LiveOcean was removed.
-
-**Storage** (`/opt/data/` in containers = `./data/` locally): `SalishSeaCast/nc/` raw NetCDF; `SalishSeaCast/images/` WebP tiles; `sensors/{id}/{sensorCategoryCode}.nc`; `cache/oa_grid_cache.npz` (grid, populated from `grid_SSC` on first use).
-
-### ClickHouse (`db-ch`)
-The sole database. API access via `api/modules/clickhouse_helpers.py` (local `CH_HOST`/`CH_PORT`, or remote with `CH_USE_REMOTE=true` + `CH_REMOTE_URL`). Key tables: `grid_SSC` (`gridX`/`gridY`/`longitude`/`latitude`; nearest-neighbor lookups + tile rendering), `SalishSeaCast_hourly`/`SalishSeaCast_daily`, `SalishSeaCast_status` (pipeline state machine), `sensors`/`sensor_timeseries`, `glider_deployments`/`glider_profiles` (C-PROOF gliders; long `profile, depth, variable, value`). Variable metadata (labels incl. compact `short`, precision, colormap bounds) lives in `shared/variable_config.yml` + `shared/colormaps.json`, not a table.
-
-### API (`api/`)
-FastAPI app in `SERVER.py`. Blocking work runs in a `ProcessPoolExecutor` via `run_in_process()`, limited by `_extract_semaphore` (default 4). The API never reads NetCDF — all data comes from ClickHouse.
-
-| Endpoint | Module |
-|---|---|
-| `POST /extractTimeseries` | `modules/extractTimeseries.py` |
-| `POST /getProfile` | `modules/extract_profile.py` — vertical profile at a point/time; `bin_mode` hourly/daily/monthly (daily/monthly read `SalishSeaCast_daily` means) |
-| `POST /depthProfile` | `modules/extract_depth_profile.py` — time-depth (Hovmöller) grid for `depth/TimeDepthHeatmap.vue`, optionally with a variable-depth sensor's casts binned onto it. Returns `grid` (`lat`/`lon`/`distanceKm` of the answering cell) |
-| `POST /getMinMax` | `modules/extractMinMax.py` |
-| `POST /sensorTimeseries` | `modules/extractSensorTimeseries.py` |
-| `POST /extract_climateTimeseries` | `modules/extract_climate_timeseries.py` |
-| `POST /analysis/timeseries` | `modules/ocean_analysis.py` |
-| `POST /pointSnapshot` | `modules/point_snapshot.py` — every variable at one point for the Explore snapshot: all eight model columns at the map's depth in one read, plus the selected sensor's variables (via `extract_sensor_timeseries`, falling back to the last reading on record). Out-of-domain returns `model: null` + `modelError` rather than a 400 |
-| `POST /crossSection` | `modules/extract_cross_section.py` — depth-vs-distance grid along a polyline (`vertices`, ≥2 `(lat, lon)`) at one time. Resamples by arc length, snaps via `shared/grid_lookup.py`'s cached KD-tree in one vectorized query, reads only distinct cells hit |
-| `GET /gliders` | `modules/gliders.py` — C-PROOF deployments with one track point per profile (map + list) |
-| `POST /gliderSection` | `modules/gliders.py` — one variable of one deployment as a depth × profile grid, with per-profile `time`/`lat`/`lon`/`distanceKm` |
-| `GET /png/{source}/{var}/{dt}/{depth}` | Serves pre-rendered tiles; on a miss, `modules/extract_image.py` renders from ClickHouse (`shared/nc2tile.py`'s `render_tile_from_db`) and caches to the same path. `dt`'s shape selects bin mode: full timestamp = hourly, `YYYY-MM-DD` = daily, `YYYY-MM` = monthly. The "bottom" pseudo-depth isn't supported on the fallback path (404s) |
-| `GET /variables` | `modules/variables.py` |
-| `POST /admin/syncHourly`, `/admin/syncDaily` | `modules/sync_hourly.py` — bearer auth (`SYNC_API_TOKEN`); imports a date's Native-format export rsynced in by the remote pipeline into `SalishSeaCast_hourly`/`_daily` (logged in `SalishSeaCast_sync_log`) |
-
-**Out-of-domain coordinates.** Point lookups go through `extractTimeseries.py`'s `_find_nearest_grid_point`, which raises `OutsideDomainError` when no `grid_SSC` cell is within `MAX_GRID_DIST_KM` (25 km). `SERVER.py`'s `_outside_domain_response` returns a 400 with a plain-string `detail` (many frontend call sites print it) **and** a structured `error` (`code: "outside_model_domain"`, `distanceKm`, `maxDistanceKm`, `requested`, `nearest`). Wired into `/extractTimeseries`, `/depthProfile`, `/getProfile`, `/extract_climateTimeseries`; frontend reads it via `useDepthProfileFetch.ts`'s `asOutsideDomainError()`. The exception must pass every field through `super().__init__` to survive `ProcessPoolExecutor` pickling. `ocean_analysis.py`'s `lookup_nearest_grid_cell` (used by `/analysis/timeseries`) is a **separate, unguarded** lookup.
-
-### Process Pipeline (`process/`)
-Entry: `process/SSC/cli.py`. Each file/day-variable is a row in `SalishSeaCast_status`, advancing:
-```
-pending_download → downloading → success_download → pending_compute → computing → success_compute
-  → pending_image → imaging → success_image → pending_ingest → success_ingest → pending_sync → success_sync
-```
-- `SSC/downloader.py` — ERDDAP fetching with backfill
-- `SSC/compute.py` — derived variables (pH, Ω aragonite) via PyCO2SYS
-- `SSC/imaging.py` — WebP tiles via `nc2tile.py`
-- `SSC/sync.py` — exports a date's rows to Native format, rsyncs them + images to the API machine (`cloudflared access ssh` ProxyCommand), then calls `POST /admin/syncHourly`
-
-`run` = `check → download → check_image → compute → check_image → image → promote → ingest → promote → sync`, defined once in `cli.pipeline_steps()`. Step helpers raise `cli.PipelineError` (not `sys.exit`) so they can run inside Prefect tasks.
-
-**Prefect.** `SSC/flows.py` is the only module importing Prefect (the CLI works without a server). Flow `oceaneco-ssc-pipeline`, deployment `OceanECO-SSC`, tag `oceaneco` (the server is shared across apps), one task run per step. Served by `scheduler` on cron `RUN_CRON` (default `0 */3 * * *`) with `RUN_LIMIT`/`RUN_WORKERS` (10/30); overlapping runs are cancelled (`CANCEL_NEW`). `SalishSeaCast.*`/`nc2tile` loggers reach task logs via `PREFECT_LOGGING_EXTRA_LOGGERS`. Sweep stages mark rows `failed_*` without raising; each run ends with an `oceaneco-ssc-status` markdown artifact and is marked Failed if any row failed. Ad-hoc runs (`date`, `force`) via the UI's "Run → custom".
-- `RUN_SCHEDULE_PAUSED` (default `false`) is re-applied on every scheduler start, so a UI pause lasts until the next restart. Stop `scheduler` for a pause that holds.
-- `prefect==` in `process/pyproject.toml` and `sensors/pyproject.toml` must be ≤ the shared server's version.
-- Prod (`docker-compose.prod.process.yml`) has no `process` service and no local server; `scheduler` (`tools` profile) reports to `PREFECT_API_URL` (`https://pipelines.cioospacific.ca/api`, basic auth `PREFECT_AUTH_STRING`). A code update means rebuilding/recreating `scheduler`.
-- Don't start a manual `SSC.cli run` while a scheduled one is in progress — both claim the same pending rows.
-- Renaming a flow/deployment leaves the old one on the server — delete it in the UI.
-
-**Shared code** (`shared/`, used by `api` and `process`): `nc2tile.py` (curvilinear → Web-Mercator WebP; grid from `grid_SSC` cached to `.npz`, bounds from `variable_config.py`, only `CH_*` env vars needed); `grid_lookup.py` (`cKDTree` over the same cached grid, built once per process, for batch nearest-cell snapping).
-
-**Sensors** (`sensors/`, own compose service, unrelated to `process/`): ONC/ERDDAP → ClickHouse. `sensors/flows.py` (only Prefect importer) defines flows `oceaneco-sensors-erddap`/`-onc`, deployments `OceanECO-sensors-ERDDAP`/`-ONC` (crons `ERDDAP_CRON` `0 * * * *`, `ONC_CRON` `30 * * * *`, same `CANCEL_NEW`/shared-server setup), one task per sensor via `store_sensor()`, which raises `FetchError` on a failed request so the run is marked Failed. Served by `sensors-scheduler` (pausable via `SENSORS_SCHEDULE_PAUSED`); its `PREFECT_API_URL` is `:?`-required. Sensors are defined only in `sensors/catalog_*.yml` (one file per harvest source; no combined catalog), loaded into the `sensors` table by `manage_sensors.py import`. An ONC variable lists `sources` (`LOCATION/DEVICE_CATEGORY/code`, priority order, child locations allowed); `onc_to_ch.py` stores each as its own series in `sensor_timeseries.source` (part of the key). Readers merge them by that priority (`extractSensorTimeseries.py`'s `series_query`, also used by `/depthProfile`); `/sensorTimeseries`' `instrument` returns one, which the "Compare instruments" toggle (on the selected sensor's card in `sensorInfo.vue`, shown only when the selected variable has several instruments; state in `useViewState('explore')`) overlays in Explore with a difference panel.
-
-**Gliders** (`sensors/cproof_to_ch.py`, CLI only — no Prefect flow yet): C-PROOF's gridded time–depth files (`L0-gridfiles/<dep>_grid[_delayed][_adjusted].nc`, discovered via `mission_all.txt`, which already picks each deployment's best variant) → `glider_deployments` + `glider_profiles`, kept apart from `sensors`/`sensor_timeseries` and their readers. The files are binned but not QC-screened, so `VARIABLES` applies a gross range per variable. Live files are rewritten in place: a deployment is re-fetched only when its ETag changes (`--force` overrides), then replaced wholesale (DELETE + insert). `--deployment ID` (repeatable) or `--all`.
-
-### Frontend (`front/`)
-Nuxt 4 + Nuxt UI v4 (Tailwind v4 + Reka UI) + Pinia. Vuetify has been fully removed — don't reintroduce `v-*` components.
-- `app/pages/index.vue` — main MapboxGL page. Map controls are `overlays.vue`: rows of related toggle buttons (Panel / Layers / Readout / Colour). Raster/vector-tile and time-animation logic lives **inline** here (no composables for it).
-- `app/pages/caseStudy/` — standalone narrative pages built from static chart exports (`public/images/case-studies/`), not live data.
-- `app/components/`, `app/stores/main.ts`, `composables/` (map-layer logic like `useBuoyLayer`/`useStationsInteraction`, and data fetching).
-- `app/config/app.ts` — domain constants (timezone, map extent/zoom/style); `app/config/palette.ts` — Material palette values charts use. Per-environment values go in `runtimeConfig` (`NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_MAPBOX_TOKEN`, `NUXT_PUBLIC_UMAMI_WEBSITE_ID`, `NUXT_PUBLIC_UMAMI_HOST`).
-- Dark-only: `colorMode` pinned in `nuxt.config.ts`; light mode is unverified.
-- **v2 "Instrument" theme** (branch `v2-instrument`): tokens in `assets/css/main.css` (`@theme static` graphite neutral + ochre accent, IBM Plex Sans/Mono, 2px radius, surface/border overrides, `--oe-model`/`--oe-sensor`/`--oe-live`, `.oe-num`/`.oe-label`/`.oe-on` helpers). One accent: it marks selection only — `app.config.ts` defaults `UButton` to `neutral`. Model series are ochre and sensor series blue everywhere (`config/palette.ts`'s `chart`, mirrored into `mainStore.colors`). Basemap fills are recoloured at runtime from `config/app.ts`'s `BASEMAP_PAINT`; roads are hidden (`BASEMAP_HIDDEN_SOURCE_LAYERS`). The Layers row's "Satellite imagery" toggle (`mainStore.showSatellite`) shows a `mapbox.satellite` raster and hides those fills; `setSatelliteVisibility` in index.vue keeps it under the model raster.
-- Model raster tiles are **value-packed**, not colour-coded (24-bit `(value−base)/precision` in RGB, alpha 0 = no data, lossless WebP); colours come from the layer's `raster-color`. The "Cursor Value" overlay (`composables/useRasterProbe.ts`) decodes the same image client-side for the hover readout — keep tiles lossless and `base` 0 or it breaks.
-
-**UI conventions.** Nuxt UI components (`UButton`, `UModal`, `USelectMenu`, `UInput`, `UTabs`, `UPopover`, `UBadge`, `UAlert`, `USeparator`, `UTable`, `UCalendar`) for anything interactive; plain elements + Tailwind for layout and styled surfaces (no need to force panels into a card component). Icons: `<UIcon name="i-mdi-foo" />` / `icon` props, MDI bundled locally via `@iconify-json/mdi` (never the remote Iconify API). Shared primitives in `app/components/ui/`: `SegmentedControl.vue` (single-select button row with radiogroup semantics + arrow keys — use it instead of hand-rolling one) and `DownloadButton.vue`.
-
-**Naming depths.** The map's raster depth, the chart's model level and a sensor's deployment depth routinely disagree (e.g. `ExplorePanel`'s `snapDepthToData` pulls the chart to the seabed level). **Never render a bare "Depth N m"**: `selectedInfo.vue` is headed `MAP LAYER · <source>` and describes only the raster; `ChartContextBar.vue` takes one `ContextItem` per source (`Field`/`Model`/`Sensor`/`Range`/`Point`) with `tone` `muted` (empty) or `warn` (why the chart looks wrong). Round sensor depths as `sensorInfo.vue`'s `depth2txt` does. `mainStore.modelDomain` carries the last point's coverage verdict (`null` = unknown, treated as in-domain).
-
-**Charts.** Always ECharts — never hand-roll on `<canvas>`. Non-standard visuals are `custom` series with `renderItem` (see `depth/TimeDepthHeatmap.vue`); set `progressive: false` on large `custom` series or only the first chunk paints. Register the dark theme via `composables/useEchartsTheme.ts` (transparent ground, mono axis labels, `line.showSymbol: false` by default — opt in for sparse series; also pins legend swatches to filled bars — series must set `itemStyle.color`, the legend ignores `lineStyle`). Take colours from `config/palette.ts`'s `chart`, not literals. Never print a raw float: use `useVariableRegistry()`'s `formatDisplayValue(varId, value, { unit })`, which expects a value **already in the display unit**.
-
-**CSV export.** All downloads go through `composables/useCsvExport.ts` + `ui/DownloadButton.vue` — never ECharts' `toolbox.feature.dataView`.
-- A host calls `provideCsvExport(context)` and renders one `DownloadButton`; data-owning components call `useCsvExport()?.register(...)` (unregistered with their scope), so several files share one menu. Hosts: `AnalysisWorkspace`, `ExplorePanel`, `CrossSectionPanel`, `ComparisonWorkspace`. A `v-show`-kept-alive host (Analysis Overview) must return `[]` while inactive or its files leak into the visible tab's menu.
-- Build datasets from *source* data (full precision), not table rows or chart state.
-- Preamble: `#`-commented `# label,value` lines from `csvMeta()` (source, source_url, variable, depth, separate `latitude`/`longitude` rows via `coord()`, window, season) — readers skip with `comment='#'`. Keep it short; no API routes/variable ids. `omitDatasetLine` drops `# dataset:` for single-file views.
-- Units go on a second header row (only when some column has one), never in column names.
-- Grids go out long (`time, depth, value`). `csvTimestamp()` writes local ISO with offset.
-- `TimeseriesChart.vue` exports one file following the legend (`legendSelected`, clipped to the axis window); `Day/Night` is always excluded (`CSV_EXCLUDED_SERIES`). Series on different x-grids are unioned with blanks, never interpolated.
-
-**Share links.** `ShareButton.vue` (app header, plus icon-only in `AnalysisWorkspace`/`ComparisonWorkspace` headers since those fullscreen modals cover it) encodes the view into `#s=<marker><base64url>` — JSON → `deflate-raw` via `CompressionStream` (marker `z`; `u` = uncompressed). Schema and both directions live in `composables/useShareState.ts` (`captureShareState`/`applyShareState`/`applySharedVariable`, `SHARE_VERSION`); newer-version or undecodable payloads are refused whole. The URL is never rewritten during normal use.
-- Capture reads **only** the Pinia store — shareable state must live in `stores/main.ts` (e.g. `analysisTab`/`analysisSeason`, `comparisonTab`/`comparisonSeason`, `mapView`, `exploreWindowEnd`).
-- Restore is two-pass: `app.vue`'s `onBeforeMount` applies self-contained state and sets `shareRestorePending` **synchronously** so index.vue's bootstrap click doesn't overwrite the shared point; variable/depth/instant resolve in `getVariables()` against the fetched list, each field degrading independently (nearest depth, nearest timestamp, fallback `temperature`).
-- Values without a consumer yet go in one-shot `pending*` slots the consumer takes and nulls: `pendingMapView` (index.vue `jumpTo`s it, with a watcher for late decode), `pendingWindowEnd` (claimed in ExplorePanel's `coverage` watcher, *after* `useTimeDepthWindow`'s reset-to-latest).
-- A drawn cross-section must be re-added to mapbox-gl-draw explicitly (`restoreSharedCrossSection` in index.vue).
-- Per-tab control state (thresholds, secondary variables, isolated year, chart zoom) goes in `mainStore.viewState` via `composables/useViewState.ts`'s `useViewState(scope)` (drop-in for a local `ref`, works with `v-model`) and `useChartZoom(scope)` (re-supply the extent on every `setOption(…, true)`, which resets `dataZoom`). The whole bag is captured as `vs`, so new controls are shareable without touching `useShareState.ts`. Values must be JSON-serialisable.
-
-#### Frontend Feature Map
-
-View navigation lives in the header (`AppNav.vue`, rendered by `app.vue` on `/`) and writes `mainStore.activeBottomTab`: two map-synced footer panes and two fullscreen workspaces (`UModal fullscreen`); Analysis is a dropdown (Model/Sensor) since the workspace has no rail of its own. Explore's sub-views (Timeseries/Model depth/Sensor depth) are a `SegmentedControl` at the left of `ExplorePanel`'s toolbar. Rule: views that read map context (point/depth/clock, or a drawn line) stay beside the map; views that only take a coordinate as input open fullscreen.
-
-| Pane | Component | Purpose | Data fetching |
-|---|---|---|---|
-| Explore (footer) | `ExplorePanel.vue` | Timeseries \| Model depth \| Sensor depth (profilers only) \| Glider (only while one is selected; `glider/GliderSection.vue`, x-axis time or along-track km). Timeseries overlays model + sensor; depth sections render via `depth/TimeDepthHeatmap.vue`, with a vertical-profile drawer (`SelectedVariableDrawer.vue`) following the bin-mode toggle and heatmap clicks. | `useSensorTimeseries.ts` → `/extractTimeseries`, `/sensorTimeseries`; `useTimeDepthWindow.ts` + `useModelTimeseries.ts`/`useDepthProfileFetch.ts` → `/depthProfile`; `useClimateTimeseries.ts` → `/extract_climateTimeseries`; `usePointSnapshot.ts` → `/pointSnapshot`; `useGliderSectionFetch.ts` → `/gliderSection` (shared with the map curtain) |
-| Cross-Section (footer) | `crossSection/CrossSectionPanel.vue` | Polyline drawn with mapbox-gl-draw (wired in `index.vue`: `crossSectionDraw` + `activeTab` watcher). Same `TimeDepthHeatmap.vue`, vertex markers as plain CSS overlay. "New line" bumps `mainStore.crossSectionRedrawToken` | `useCrossSectionFetch.ts` → `/crossSection` |
-| Analysis (fullscreen) | `AnalysisWorkspace.vue` | Tabs: Overview (`analysis/AnalysisBuilder.vue`, `source: 'model' \| 'sensor'`), Extreme Events, Compound Stress, Trend, Climatology Anomaly, Correlation | `useAnalysisFetch.ts`/`useSensorAnalysisFetch.ts` → `/analysis/timeseries`; one shared primary series via `fetchSeriesFor`, memoized `cachedFetch` for secondary variables |
-| Comparison (fullscreen) | `ComparisonWorkspace.vue` | Tabs: Timeseries (`sensorComparison.vue`), Depth sections (`comparison/ComparisonSections.vue`, variable-depth sensors only), Scatter, Residuals, Seasonal Cycle — only when a sensor is selected | — |
-
-`selectSensor` in `stores/main.ts` deliberately doesn't switch panes (it would throw a dialog over the map on every buoy click); the sensor overlays on Explore's timeseries instead. The model controls live in a permanent right-hand column of the footer, shared by Explore and Cross-section: `snapshot/PointSnapshot.vue` heads with `snapshot/ModelControls.vue` (Model source — kept as a menu for a future second model — and Depth dropdown with steppers), then every variable's model and sensor value at the clicked point with a 72 h plot. There is no Field dropdown: a card click (`mainStore.selectVariable()`) is how the field is picked. `sensorInfo.vue` is, despite its name, the left panel's sole content (`controlPanel.vue`): the sensor list (plus a metadata dialog and heatmap dialog); rows show live status, organization, variables (config `short` labels via `variableShort()`), distance from the clicked point and last-reading age, the selected one expands with coverage/position/actions; it scrolls the selected sensor into view. Map markers (`useBuoyLayer.ts`) are sensor-blue squares (fixed) or diamonds (profilers) with a green dot when live; `setSelectedBuoy()` rings the selected sensor's marker and `setHoveredBuoy()` (from `mainStore.hoveredSensorId`, set by hovering a `sensorInfo.vue` row) glows it. Gliders (`useGliderLayer.ts`, from `/gliders`, Layers-row toggle) are a track line plus a sensor-blue triangle at the latest fix; they're listed as a "Gliders" group at the end of `sensorInfo.vue`. `mainStore.selectGlider()` opens Explore's Glider view; a glider and a sensor are never selected together (`setSelectedSensor` clears the glider), and a map click clears both. With a glider selected, a tilted map shows its section as a "curtain" hanging under the track (`useGliderCurtain.ts`: a Mapbox custom WebGL layer, depth ×30, fading in with pitch, depth lines labelled by DOM text re-placed each frame); the Glider view's "3D" button (`mainStore.toggleGliderTilt()` → index.vue) tilts side-on to the track and frames the curtain, or flattens. Section colours — Explore heatmap and curtain — come from `useFieldColorRamp.ts`, the map's own colorbar for the selected field. Client-side stats: `composables/useAnalysisStatistics.ts`.
-
-### Usage Analytics (Umami)
-Umami on the shared CIOOS Pacific server (https://analytics.cioospacific.ca) is the only analytics tool, **frontend-only** — the API sends nothing (Umami drops bot User-Agents, so server-side events would only re-log browser clicks). No-op when `NUXT_PUBLIC_UMAMI_WEBSITE_ID` is unset.
-- `app/plugins/umami.client.ts` injects the tracker (`data-exclude-hash` keeps `#s=` share payloads out of pageview URLs); `composables/useAnalytics.ts`'s `trackEvent()` calls `window.umami?.track`. Events: `sensor_selected`, `model_point_queried`, `tab_switched` / `query_mode_changed` / `analysis_source_changed` / `explore_view_changed` (in `main.ts` store actions), `variable_changed`, `share_link_created`. Don't instrument auto-firing paths (`getMinMax`'s `autorange()`, Analysis `scheduleAutoRun`, bin-mode toggles).
-- **Gotcha**: env var changes need `docker compose up -d --force-recreate front` (a `restart` keeps old env). On Vercel, `vercel.json` disables git auto-deploy — trigger a manual deploy after changing env vars.
+## Frontend rules that apply everywhere
+- Use Nuxt UI components for anything interactive. Icons come from the locally bundled MDI set, never the remote Iconify API.
+- Charts are always ECharts, with colours from `config/palette.ts`'s `chart`. Never print a raw float: use `formatDisplayValue(varId, value, { unit })`, with the value already in display units.
+- Never render a bare "Depth N m" (see Naming depths in `frontend.md`).
+- All CSV downloads go through `useCsvExport.ts` and `ui/DownloadButton.vue`.
+- Shareable state must live in `stores/main.ts`; per-tab control state goes through `useViewState(scope)`.
+- Model raster tiles are value-packed, so keep them lossless with `base` 0.
 
 ## Python Environment
 `process/`, `scripts/` use **uv** (`pyproject.toml` + `uv.lock`); `api/` uses pip + `requirements.txt`. Each has its own `.venv`.

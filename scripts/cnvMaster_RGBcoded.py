@@ -57,6 +57,21 @@ def _build_color_table():
     return colors
 
 ALL_COLORS = _build_color_table()
+RESAMPLING = Resampling.bilinear
+
+
+def configure(output_dir=None, min_org=None, min_zoom=None, max_zoom=None, resampling=None):
+    """Override the CONFIG block from the CLI. Must run before the worker Pool
+    starts: workers are forked and inherit these module globals."""
+    global OUTPUT_DIR, MIN_ORG, MIN_ZOOM, MAX_ZOOM, MAX_IDX, ALL_COLORS, RESAMPLING
+    if output_dir is not None: OUTPUT_DIR = output_dir
+    if min_zoom is not None: MIN_ZOOM = min_zoom
+    if max_zoom is not None: MAX_ZOOM = max_zoom
+    if resampling is not None: RESAMPLING = Resampling[resampling]
+    if min_org is not None:
+        MIN_ORG = min_org
+        MAX_IDX = math.ceil(-MIN_ORG / STEP)
+        ALL_COLORS = _build_color_table()
 
 
 ###################################################################
@@ -120,7 +135,7 @@ def render_tile(z, tx, ty):
             src_crs       = _src_crs,
             dst_transform = dst_transform,
             dst_crs       = WEB_MERCATOR,
-            resampling    = Resampling.bilinear,
+            resampling    = RESAMPLING,
             src_nodata    = _nodata,
             dst_nodata    = np.nan,
         )
@@ -229,7 +244,15 @@ if __name__ == '__main__':
         default=TIFF_PATTERN,
         help=f'Glob pattern (relative to --tiff-dir) for input GeoTIFF files (default: {TIFF_PATTERN!r})'
     )
+    parser.add_argument('--output-dir', default=OUTPUT_DIR, help=f'Tile tree root (default: {OUTPUT_DIR!r})')
+    parser.add_argument('--min-org', type=float, default=MIN_ORG,
+                        help=f'Deepest encodable value in metres; the decoder needs the same base (default: {MIN_ORG})')
+    parser.add_argument('--min-zoom', type=int, default=MIN_ZOOM, help=f'(default: {MIN_ZOOM})')
+    parser.add_argument('--max-zoom', type=int, default=MAX_ZOOM, help=f'(default: {MAX_ZOOM})')
+    parser.add_argument('--resampling', default='bilinear', choices=['bilinear', 'average', 'nearest', 'cubic'],
+                        help="'average' when the source is much finer than the tiles (e.g. the 10 m DEM at low zooms)")
     args = parser.parse_args()
+    configure(args.output_dir, args.min_org, args.min_zoom, args.max_zoom, args.resampling)
     main(tiff_dir=args.tiff_dir, pattern=args.pattern)
 
 

@@ -1,7 +1,7 @@
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from typing import List, Literal, Optional, Tuple
 from functools import partial
@@ -12,6 +12,7 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 import json
+import gzip
 from starlette.concurrency import run_in_threadpool
 import numpy as np
 
@@ -228,11 +229,20 @@ async def get_sensors():
 
 #######################################
 
+def _gzip_json(request: Request, payload) -> Response:
+    """JSON, gzipped when the client takes it: glider tracks and sections run to hundreds of KB."""
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    if "gzip" not in request.headers.get("accept-encoding", ""):
+        return Response(body, media_type="application/json")
+    return Response(gzip.compress(body, 5), media_type="application/json",
+                    headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+
+
 @app.get("/gliders")
-async def get_gliders():
-    """C-PROOF glider deployments with one track point per profile."""
+async def get_gliders(request: Request):
+    """C-PROOF glider deployments, each with its simplified track."""
     try:
-        return await run_in_threadpool(list_gliders)
+        return _gzip_json(request, await run_in_threadpool(list_gliders))
     except Exception as exc:
         logger.exception("get_gliders failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -241,12 +251,17 @@ async def get_gliders():
 class gliderSectionRequest(BaseModel):
     deployment: str
     var: str
+    # Profile-number window (inclusive); the whole deployment when omitted.
+    start: Optional[int] = None
+    end: Optional[int] = None
 
 @app.post("/gliderSection")
-async def get_glider_section(request: gliderSectionRequest):
-    """One variable of one glider deployment as a depth x profile grid."""
+async def get_glider_section(request: gliderSectionRequest, http: Request):
+    """One variable of one glider deployment (or a window of it) as an averaged depth x profile grid."""
     try:
-        return await run_in_threadpool(extract_glider_section, request.deployment, request.var)
+        section = await run_in_threadpool(extract_glider_section, request.deployment, request.var,
+                                          request.start, request.end)
+        return _gzip_json(http, section)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
@@ -581,6 +596,22 @@ async def get_raster_tiles(z: int, x: int, y: int):
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Allow-Headers": "*",
         "Vary": "Origin",
+        "ETag": f'"{full_path}-v1"',
+    }
+    return FileResponse(full_path, media_type="image/webp", headers=headers)
+
+
+@app.get("/seafloor/{z}/{x}/{y}.webp")
+async def get_seafloor_tiles(z: int, x: int, y: int):
+    """Value-packed seafloor depth tiles (z5–10) for the glider curtain's 3D
+    seafloor, built by scripts/cnvMaster_RGBcoded.py with --min-org -11000."""
+    root = os.environ.get("SEAFLOOR_TILES_ROOT", "/opt/data/bathymetry/seafloor_tiles")
+    full_path = os.path.join(root, str(z), str(x), f"{y}.webp")
+    if not await run_in_threadpool(os.path.isfile, full_path):
+        raise HTTPException(status_code=404, detail="Seafloor tile not found")
+    headers = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Access-Control-Allow-Origin": "*",
         "ETag": f'"{full_path}-v1"',
     }
     return FileResponse(full_path, media_type="image/webp", headers=headers)

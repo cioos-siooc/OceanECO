@@ -1,9 +1,18 @@
 import mapboxgl from 'mapbox-gl';
+import type { SeafloorGrid } from './useSeafloorGrid';
 
 // The selected glider's section hung as a vertical "curtain" under its track,
-// seen when the map is tilted. A Mapbox custom WebGL layer: one triangle strip
-// along the track (a top and a bottom vertex per profile) textured with the
-// section's cells, coloured by the map's own colorbar.
+// seen when the map is tilted, over a shaded 3D seafloor around it. A Mapbox
+// custom WebGL layer:
+// - curtain: one triangle strip along the track (a top and a bottom vertex per
+//   profile) textured with the section's cells, coloured by the map's colorbar;
+// - seafloor: a mesh of the bathymetry grid, depth-ramped slate grey with
+//   hillshade, never the field colours, so it can't be read as data.
+// Both are drawn into our own framebuffer with its own depth buffer (so a slope
+// in front hides the curtain behind it) and then composited onto the map.
+// Mapbox's depth buffer is never touched: the track and markers drawn after it
+// stay on top, as they should — anything at the surface is in front of anything
+// below it.
 const LAYER_ID = 'glider-curtain';
 // Depth is stretched or a 1000 m dive under a ~150 km transect is a hairline.
 export const CURTAIN_EXAGGERATION = 30;
@@ -13,6 +22,11 @@ const PITCH_SHOWN = 30;
 const DEPTH_LINE_STEP_M = 200;
 // Columns past this are sampled, not all uploaded (well under any GPU's limit).
 const MAX_TEXTURE_WIDTH = 4096;
+// Seafloor ramp (shallow → deep, at SEAFLOOR_RAMP_M) and light from the north-west.
+const SEAFLOOR_SHALLOW = [150, 164, 178];
+const SEAFLOOR_DEEP = [38, 48, 60];
+const SEAFLOOR_RAMP_M = 3000;
+const LIGHT = (() => { const l = [-1, 1, 1.4]; const n = Math.hypot(...l); return l.map(v => v / n); })();
 
 export type CurtainSection = {
     lon: number[];
@@ -103,6 +117,90 @@ function buildGeometry(s: CurtainSection): Geometry | null {
     return { vertices, count: n * 2, texture, width, height: m, depthRange: [top, bottom], anchors, reach, lines };
 }
 
+type Seafloor = {
+    vertices: Float32Array;         // x, y, z, r, g, b, a per node
+    indices: Uint32Array;
+};
+
+const SEA_VERT = `#version 300 es
+in vec3 a_pos;
+in vec4 a_color;
+uniform mat4 u_matrix;
+out vec4 v_color;
+void main() {
+    v_color = a_color;
+    gl_Position = u_matrix * vec4(a_pos, 1.0);
+}`;
+
+const SEA_FRAG = `#version 300 es
+precision mediump float;
+in vec4 v_color;
+out vec4 fragColor;
+void main() {
+    fragColor = vec4(v_color.rgb * v_color.a, v_color.a);
+}`;
+
+// One full-screen triangle sampling the offscreen render (premultiplied).
+const COMP_VERT = `#version 300 es
+out vec2 v_uv;
+void main() {
+    vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+    v_uv = p * 0.5 + 0.5;
+    gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+const COMP_FRAG = `#version 300 es
+precision mediump float;
+uniform sampler2D u_tex;
+uniform float u_opacity;
+in vec2 v_uv;
+out vec4 fragColor;
+void main() {
+    fragColor = texture(u_tex, v_uv) * u_opacity;
+}`;
+
+function buildSeafloor(grid: SeafloorGrid): Seafloor | null {
+    const { nx, ny, x0, y0, dx, dy, depth } = grid;
+    // Exaggerated height (m, up); land counts as sea level so the coast slopes up to it.
+    const h = (i: number, j: number) => {
+        const v = depth[Math.min(ny - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))]!;
+        return Number.isNaN(v) ? 0 : -v * CURTAIN_EXAGGERATION;
+    };
+    const fade = Math.max(2, 0.08 * Math.min(nx, ny));
+    const vertices = new Float32Array(nx * ny * 7);
+    for (let j = 0; j < ny; j++) {
+        const y = y0 + j * dy;
+        const unitsPerM = new mapboxgl.MercatorCoordinate(x0, y, 0).meterInMercatorCoordinateUnits();
+        const mx = dx / unitsPerM, my = dy / unitsPerM; // node spacing in metres
+        for (let i = 0; i < nx; i++) {
+            const d = depth[j * nx + i]!;
+            if (Number.isNaN(d)) continue;
+            // Normal from central differences (east, north, up); rows run north → south.
+            const ex = -(h(i + 1, j) - h(i - 1, j)) / (2 * mx);
+            const ey = -(h(i, j - 1) - h(i, j + 1)) / (2 * my);
+            const nl = Math.hypot(ex, ey, 1);
+            const lambert = Math.max(0, (ex * LIGHT[0]! + ey * LIGHT[1]! + LIGHT[2]!) / nl);
+            const shade = 0.35 + 0.65 * lambert;
+            const t = Math.min(1, d / SEAFLOOR_RAMP_M);
+            const edge = Math.min(1, Math.min(i, j, nx - 1 - i, ny - 1 - j) / fade);
+            vertices.set([
+                x0 + i * dx, y, -d * CURTAIN_EXAGGERATION * unitsPerM,
+                ...SEAFLOOR_SHALLOW.map((c, k) => (c + (SEAFLOOR_DEEP[k]! - c) * t) * shade / 255),
+                edge,
+            ], (j * nx + i) * 7);
+        }
+    }
+    const idx: number[] = [];
+    for (let j = 0; j < ny - 1; j++) {
+        for (let i = 0; i < nx - 1; i++) {
+            const a = j * nx + i, b = a + 1, c = a + nx, e = c + 1;
+            if ([a, b, c, e].some(k => Number.isNaN(depth[k]!))) continue;
+            idx.push(a, c, b, b, c, e);
+        }
+    }
+    return idx.length ? { vertices, indices: new Uint32Array(idx) } : null;
+}
+
 function compile(gl: WebGL2RenderingContext, type: number, src: string) {
     const sh = gl.createShader(type)!;
     gl.shaderSource(sh, src);
@@ -111,22 +209,58 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string) {
     return sh;
 }
 
+/**
+ * Mapbox fits its far plane to the sea surface, so seafloor tens of km below it
+ * (exaggerated) gets clipped, worst at low pitch. Our pass has its own depth
+ * buffer, so push the far plane out for it: recover near/far from the clip
+ * matrix's z row (row2 = -P22 * row3 + P23 * e4 for a GL perspective, column-
+ * major) and rebuild that row with a farther far.
+ */
+function withFarPlane(m: number[], factor: number): Float32Array {
+    const out = Float32Array.from(m);
+    const r3 = [m[3]!, m[7]!, m[11]!, m[15]!];
+    let k = 0;
+    for (let c = 1; c < 3; c++) if (Math.abs(r3[c]!) > Math.abs(r3[k]!)) k = c;
+    if (!r3[k]) return out;
+    const p22 = -m[k * 4 + 2]! / r3[k]!;
+    const p23 = m[14]! + p22 * m[15]!;
+    const near = p23 / (p22 - 1), far = p23 / (p22 + 1) * factor;
+    const q22 = (far + near) / (near - far), q23 = (2 * far * near) / (near - far);
+    for (let c = 0; c < 4; c++) out[c * 4 + 2] = -q22 * r3[c]! + (c === 3 ? q23 : 0);
+    return out;
+}
+
+function link(gl: WebGL2RenderingContext, vert: string, frag: string) {
+    const p = gl.createProgram()!;
+    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vert));
+    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, frag));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? 'program link failed');
+    return p;
+}
+
+type Programs = {
+    curtain: WebGLProgram; sea: WebGLProgram; comp: WebGLProgram;
+    curtainVao: WebGLVertexArrayObject; seaVao: WebGLVertexArrayObject; compVao: WebGLVertexArrayObject;
+    curtainBuf: WebGLBuffer; seaBuf: WebGLBuffer; seaIdx: WebGLBuffer; curtainTex: WebGLTexture;
+};
+
+// Offscreen target: multisampled colour + depth, resolved into a texture.
+type Target = { w: number; h: number; ms: WebGLFramebuffer; color: WebGLRenderbuffer; depth: WebGLRenderbuffer; resolve: WebGLFramebuffer; tex: WebGLTexture };
+
 function createCurtainLayer(map: mapboxgl.Map) {
     let gl: WebGL2RenderingContext | null = null;
-    let program: WebGLProgram | null = null;
-    let vao: WebGLVertexArrayObject | null = null;
-    let buffer: WebGLBuffer | null = null;
-    let tex: WebGLTexture | null = null;
-    let loc = {} as {
-        pos: number; uv: number;
-        matrix: WebGLUniformLocation | null; tex: WebGLUniformLocation | null; opacity: WebGLUniformLocation | null;
-        depth: WebGLUniformLocation | null; step: WebGLUniformLocation | null;
-    };
+    let P: Programs | null = null;
+    let target: Target | null = null;
     let geometry: Geometry | null = null;
+    let seafloor: Seafloor | null = null;
+    let seaCount = 0;
     // Uploads wait for render(): Mapbox caches GL bindings and only resets that
     // cache after a custom layer draws, so touching GL elsewhere would desync it.
     let pending: Geometry | null | undefined;
+    let pendingSea: Seafloor | null | undefined;
     let visible = true;
+    let seafloorVisible = true;
     // Depth-line labels: DOM text over the canvas, re-placed every frame.
     const labelBox = document.createElement('div');
     labelBox.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;';
@@ -178,17 +312,18 @@ function createCurtainLayer(map: mapboxgl.Map) {
         });
     }
 
-    function upload(g: WebGL2RenderingContext, geo: Geometry) {
-        g.bindVertexArray(vao);
-        g.bindBuffer(g.ARRAY_BUFFER, buffer);
+    function uploadCurtain(g: WebGL2RenderingContext, p: Programs, geo: Geometry) {
+        g.bindVertexArray(p.curtainVao);
+        g.bindBuffer(g.ARRAY_BUFFER, p.curtainBuf);
         g.bufferData(g.ARRAY_BUFFER, geo.vertices, g.STATIC_DRAW);
-        g.enableVertexAttribArray(loc.pos);
-        g.vertexAttribPointer(loc.pos, 3, g.FLOAT, false, 20, 0);
-        g.enableVertexAttribArray(loc.uv);
-        g.vertexAttribPointer(loc.uv, 2, g.FLOAT, false, 20, 12);
+        const pos = g.getAttribLocation(p.curtain, 'a_pos'), uv = g.getAttribLocation(p.curtain, 'a_uv');
+        g.enableVertexAttribArray(pos);
+        g.vertexAttribPointer(pos, 3, g.FLOAT, false, 20, 0);
+        g.enableVertexAttribArray(uv);
+        g.vertexAttribPointer(uv, 2, g.FLOAT, false, 20, 12);
         g.bindVertexArray(null);
 
-        g.bindTexture(g.TEXTURE_2D, tex);
+        g.bindTexture(g.TEXTURE_2D, p.curtainTex);
         g.pixelStorei(g.UNPACK_FLIP_Y_WEBGL, false);
         g.pixelStorei(g.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
         g.pixelStorei(g.UNPACK_ALIGNMENT, 4);
@@ -199,78 +334,175 @@ function createCurtainLayer(map: mapboxgl.Map) {
         g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
     }
 
+    function uploadSeafloor(g: WebGL2RenderingContext, p: Programs, sea: Seafloor) {
+        g.bindVertexArray(p.seaVao);
+        g.bindBuffer(g.ARRAY_BUFFER, p.seaBuf);
+        g.bufferData(g.ARRAY_BUFFER, sea.vertices, g.STATIC_DRAW);
+        const pos = g.getAttribLocation(p.sea, 'a_pos'), color = g.getAttribLocation(p.sea, 'a_color');
+        g.enableVertexAttribArray(pos);
+        g.vertexAttribPointer(pos, 3, g.FLOAT, false, 28, 0);
+        g.enableVertexAttribArray(color);
+        g.vertexAttribPointer(color, 4, g.FLOAT, false, 28, 12);
+        g.bindBuffer(g.ELEMENT_ARRAY_BUFFER, p.seaIdx);
+        g.bufferData(g.ELEMENT_ARRAY_BUFFER, sea.indices, g.STATIC_DRAW);
+        g.bindVertexArray(null);
+    }
+
+    function ensureTarget(g: WebGL2RenderingContext, w: number, h: number): Target {
+        if (target && target.w === w && target.h === h) return target;
+        if (target) deleteTarget(g, target);
+        const samples = Math.min(4, g.getParameter(g.MAX_SAMPLES) as number);
+        const color = g.createRenderbuffer()!;
+        g.bindRenderbuffer(g.RENDERBUFFER, color);
+        g.renderbufferStorageMultisample(g.RENDERBUFFER, samples, g.RGBA8, w, h);
+        const depth = g.createRenderbuffer()!;
+        g.bindRenderbuffer(g.RENDERBUFFER, depth);
+        g.renderbufferStorageMultisample(g.RENDERBUFFER, samples, g.DEPTH_COMPONENT24, w, h);
+        const ms = g.createFramebuffer()!;
+        g.bindFramebuffer(g.FRAMEBUFFER, ms);
+        g.framebufferRenderbuffer(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.RENDERBUFFER, color);
+        g.framebufferRenderbuffer(g.FRAMEBUFFER, g.DEPTH_ATTACHMENT, g.RENDERBUFFER, depth);
+        const tex = g.createTexture()!;
+        g.bindTexture(g.TEXTURE_2D, tex);
+        g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, w, h, 0, g.RGBA, g.UNSIGNED_BYTE, null);
+        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+        const resolve = g.createFramebuffer()!;
+        g.bindFramebuffer(g.FRAMEBUFFER, resolve);
+        g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tex, 0);
+        target = { w, h, ms, color, depth, resolve, tex };
+        return target;
+    }
+
+    function deleteTarget(g: WebGL2RenderingContext, t: Target) {
+        g.deleteFramebuffer(t.ms);
+        g.deleteFramebuffer(t.resolve);
+        g.deleteRenderbuffer(t.color);
+        g.deleteRenderbuffer(t.depth);
+        g.deleteTexture(t.tex);
+    }
+
     const layer = {
         id: LAYER_ID,
         type: 'custom' as const,
-        // 2D: no depth test, so the track and markers drawn after it stay on top
-        // (anything at the surface is in front of anything below it).
         renderingMode: '2d' as const,
 
         onAdd(_map: mapboxgl.Map, context: WebGL2RenderingContext) {
-            gl = context;
             map.getCanvasContainer().appendChild(labelBox);
-            if (typeof WebGL2RenderingContext === 'undefined' || !(gl instanceof WebGL2RenderingContext)) {
+            if (typeof WebGL2RenderingContext === 'undefined' || !(context instanceof WebGL2RenderingContext)) {
                 console.warn('glider curtain needs WebGL2');
-                gl = null;
                 return;
             }
-            program = gl.createProgram()!;
-            gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERT));
-            gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAG));
-            gl.linkProgram(program);
-            loc = {
-                pos: gl.getAttribLocation(program, 'a_pos'),
-                uv: gl.getAttribLocation(program, 'a_uv'),
-                matrix: gl.getUniformLocation(program, 'u_matrix'),
-                tex: gl.getUniformLocation(program, 'u_tex'),
-                opacity: gl.getUniformLocation(program, 'u_opacity'),
-                depth: gl.getUniformLocation(program, 'u_depth'),
-                step: gl.getUniformLocation(program, 'u_step'),
+            gl = context;
+            P = {
+                curtain: link(gl, VERT, FRAG),
+                sea: link(gl, SEA_VERT, SEA_FRAG),
+                comp: link(gl, COMP_VERT, COMP_FRAG),
+                curtainVao: gl.createVertexArray()!,
+                seaVao: gl.createVertexArray()!,
+                compVao: gl.createVertexArray()!,
+                curtainBuf: gl.createBuffer()!,
+                seaBuf: gl.createBuffer()!,
+                seaIdx: gl.createBuffer()!,
+                curtainTex: gl.createTexture()!,
             };
-            vao = gl.createVertexArray();
-            buffer = gl.createBuffer();
-            tex = gl.createTexture();
         },
 
         render(g: WebGL2RenderingContext, matrix: number[]) {
-            if (!gl || !program) return;
+            if (!gl || !P) return;
             if (pending !== undefined) {
                 geometry = pending;
-                if (geometry) upload(g, geometry);
+                if (geometry) uploadCurtain(g, P, geometry);
                 buildLabels(geometry);
                 pending = undefined;
             }
+            if (pendingSea !== undefined) {
+                seafloor = pendingSea;
+                if (seafloor) uploadSeafloor(g, P, seafloor);
+                seaCount = seafloor?.indices.length ?? 0;
+                pendingSea = undefined;
+            }
             const t = Math.max(0, Math.min(1, (map.getPitch() - PITCH_HIDDEN) / (PITCH_SHOWN - PITCH_HIDDEN)));
-            labelBox.style.display = visible && geometry && t ? '' : 'none';
-            if (!visible || !geometry || !t) return;
-            labelBox.style.opacity = String(t);
-            placeLabels(geometry, matrix);
+            const drawSea = seafloorVisible && seaCount > 0;
+            const show = visible && t > 0 && (!!geometry || drawSea);
+            labelBox.style.display = show && geometry ? '' : 'none';
+            if (!show) return;
+            if (geometry) {
+                labelBox.style.opacity = String(t);
+                placeLabels(geometry, matrix);
+            }
 
-            g.useProgram(program);
-            g.uniformMatrix4fv(loc.matrix, false, new Float32Array(matrix));
-            g.uniform1f(loc.opacity, 0.95 * t);
-            g.uniform2f(loc.depth, geometry.depthRange[0], geometry.depthRange[1]);
-            g.uniform1f(loc.step, DEPTH_LINE_STEP_M);
-            g.activeTexture(g.TEXTURE0);
-            g.bindTexture(g.TEXTURE_2D, tex);
-            g.uniform1i(loc.tex, 0);
-            g.disable(g.DEPTH_TEST);
+            const prevFbo = g.getParameter(g.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+            const vp = g.getParameter(g.VIEWPORT) as Int32Array;
+            const tg = ensureTarget(g, vp[2]!, vp[3]!);
+            const m = withFarPlane(matrix, 4);
+
+            // 1. Seafloor and curtain, depth-tested against each other only.
+            g.bindFramebuffer(g.FRAMEBUFFER, tg.ms);
+            g.viewport(0, 0, tg.w, tg.h);
+            g.disable(g.SCISSOR_TEST);
+            g.disable(g.STENCIL_TEST);
             g.disable(g.CULL_FACE);
+            g.colorMask(true, true, true, true);
+            g.depthMask(true);
+            g.depthRange(0, 1);
+            g.clearColor(0, 0, 0, 0);
+            g.clearDepth(1);
+            g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
+            g.enable(g.DEPTH_TEST);
+            g.depthFunc(g.LEQUAL);
             g.enable(g.BLEND);
             g.blendFunc(g.ONE, g.ONE_MINUS_SRC_ALPHA);
-            g.bindVertexArray(vao);
-            g.drawArrays(g.TRIANGLE_STRIP, 0, geometry.count);
+
+            if (drawSea) {
+                g.useProgram(P.sea);
+                g.uniformMatrix4fv(g.getUniformLocation(P.sea, 'u_matrix'), false, m);
+                g.bindVertexArray(P.seaVao);
+                g.drawElements(g.TRIANGLES, seaCount, g.UNSIGNED_INT, 0);
+            }
+            if (geometry) {
+                g.useProgram(P.curtain);
+                g.uniformMatrix4fv(g.getUniformLocation(P.curtain, 'u_matrix'), false, m);
+                g.uniform1f(g.getUniformLocation(P.curtain, 'u_opacity'), 1);
+                g.uniform2f(g.getUniformLocation(P.curtain, 'u_depth'), geometry.depthRange[0], geometry.depthRange[1]);
+                g.uniform1f(g.getUniformLocation(P.curtain, 'u_step'), DEPTH_LINE_STEP_M);
+                g.activeTexture(g.TEXTURE0);
+                g.bindTexture(g.TEXTURE_2D, P.curtainTex);
+                g.uniform1i(g.getUniformLocation(P.curtain, 'u_tex'), 0);
+                g.bindVertexArray(P.curtainVao);
+                g.drawArrays(g.TRIANGLE_STRIP, 0, geometry.count);
+            }
+
+            // 2. Resolve the multisampled render into a texture.
+            g.bindFramebuffer(g.READ_FRAMEBUFFER, tg.ms);
+            g.bindFramebuffer(g.DRAW_FRAMEBUFFER, tg.resolve);
+            g.blitFramebuffer(0, 0, tg.w, tg.h, 0, 0, tg.w, tg.h, g.COLOR_BUFFER_BIT, g.NEAREST);
+
+            // 3. Composite onto whatever Mapbox was drawing into.
+            g.bindFramebuffer(g.FRAMEBUFFER, prevFbo);
+            g.viewport(vp[0]!, vp[1]!, vp[2]!, vp[3]!);
+            g.disable(g.DEPTH_TEST);
+            g.useProgram(P.comp);
+            g.activeTexture(g.TEXTURE0);
+            g.bindTexture(g.TEXTURE_2D, tg.tex);
+            g.uniform1i(g.getUniformLocation(P.comp, 'u_tex'), 0);
+            g.uniform1f(g.getUniformLocation(P.comp, 'u_opacity'), 0.95 * t);
+            g.bindVertexArray(P.compVao);
+            g.drawArrays(g.TRIANGLES, 0, 3);
             g.bindVertexArray(null);
         },
 
         onRemove(_map: mapboxgl.Map, g: WebGL2RenderingContext) {
             labelBox.remove();
-            if (!gl) return;
-            g.deleteProgram(program);
-            g.deleteVertexArray(vao);
-            g.deleteBuffer(buffer);
-            g.deleteTexture(tex);
+            if (!gl || !P) return;
+            for (const p of [P.curtain, P.sea, P.comp]) g.deleteProgram(p);
+            for (const v of [P.curtainVao, P.seaVao, P.compVao]) g.deleteVertexArray(v);
+            for (const b of [P.curtainBuf, P.seaBuf, P.seaIdx]) g.deleteBuffer(b);
+            g.deleteTexture(P.curtainTex);
+            if (target) deleteTarget(g, target);
             gl = null;
+            P = null;
+            target = null;
         },
 
         setSection(section: CurtainSection | null) {
@@ -278,8 +510,18 @@ function createCurtainLayer(map: mapboxgl.Map) {
             map.triggerRepaint();
         },
 
+        setSeafloor(grid: SeafloorGrid | null) {
+            pendingSea = grid ? buildSeafloor(grid) : null;
+            map.triggerRepaint();
+        },
+
         setVisible(v: boolean) {
             visible = v;
+            map.triggerRepaint();
+        },
+
+        setSeafloorVisible(v: boolean) {
+            seafloorVisible = v;
             map.triggerRepaint();
         },
     };
@@ -288,19 +530,32 @@ function createCurtainLayer(map: mapboxgl.Map) {
 
 const layers = new WeakMap<mapboxgl.Map, ReturnType<typeof createCurtainLayer>>();
 
-/** Show `section` as the curtain (null clears it), adding the layer below `beforeId` on first use. */
-export function setGliderCurtain(map: mapboxgl.Map | null, section: CurtainSection | null, beforeId?: string) {
-    if (!map) return;
+function ensureLayer(map: mapboxgl.Map, beforeId?: string) {
     let layer = layers.get(map);
     if (!layer || !map.getLayer(LAYER_ID)) {
-        if (!section) return;
         layer = createCurtainLayer(map);
         layers.set(map, layer);
         map.addLayer(layer, beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     }
-    layer.setSection(section);
+    return layer;
+}
+
+/** Show `section` as the curtain (null clears it), adding the layer below `beforeId` on first use. */
+export function setGliderCurtain(map: mapboxgl.Map | null, section: CurtainSection | null, beforeId?: string) {
+    if (!map || (!section && !layers.get(map))) return;
+    ensureLayer(map, beforeId).setSection(section);
+}
+
+/** Show the seafloor around the curtain (null clears it). */
+export function setGliderSeafloor(map: mapboxgl.Map | null, grid: SeafloorGrid | null, beforeId?: string) {
+    if (!map || (!grid && !layers.get(map))) return;
+    ensureLayer(map, beforeId).setSeafloor(grid);
 }
 
 export function setGliderCurtainVisibility(map: mapboxgl.Map | null, visible: boolean) {
     if (map) layers.get(map)?.setVisible(visible);
+}
+
+export function setGliderSeafloorVisibility(map: mapboxgl.Map | null, visible: boolean) {
+    if (map) layers.get(map)?.setSeafloorVisible(visible);
 }

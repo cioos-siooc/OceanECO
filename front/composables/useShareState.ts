@@ -57,6 +57,8 @@ export interface SharedState {
     map?: { c: [number, number], z: number, b?: number, p?: number }
     /** last clicked point, [lat, lng] */
     pt?: [number, number]
+    /** selected glider deployment, plus its section's profile window when zoomed */
+    gl?: [string] | [string, number, number]
     tab?: 'explore' | 'analysis' | 'comparison' | 'crossSection'
     ev?: 'series' | 'model-depth' | 'sensor-depth'
     bin?: BinMode
@@ -159,6 +161,9 @@ export function captureShareState(): SharedState {
         bin: s.exploreBinMode,
         we: s.exploreWindowEnd ?? undefined,
         sen: s.selectedSensor?.id ? [s.selectedSensor.id, s.selectedSensor.depth] : undefined,
+        gl: s.selectedGliderId
+            ? (s.gliderRange ? [s.selectedGliderId, ...s.gliderRange] : [s.selectedGliderId])
+            : undefined,
         as: s.analysisSource,
         at: s.analysisTab,
         ase: s.analysisSeason,
@@ -222,6 +227,12 @@ export function applyShareState(state: SharedState): void {
     // depth to the nearest model level and pushes a snack explaining the move
     // — both wrong here: the shared depth is already what the sender saw.
     if (state.sen) s.setSelectedSensor({ id: state.sen[0], depth: state.sen[1] })
+
+    // Direct, like the sensor: the shared Explore view already says where it shows.
+    if (state.gl) {
+        s.selectedGliderId = state.gl[0]
+        s.gliderRange = state.gl.length === 3 ? [state.gl[1], state.gl[2]] : null
+    }
 
     if (state.xs?.length) s.setCrossSectionLine(state.xs.map(([lat, lng]) => ({ lat, lng })))
 

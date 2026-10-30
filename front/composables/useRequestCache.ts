@@ -15,6 +15,8 @@ export function createRequestCache<T>(ttlMs: number) {
         const now = Date.now();
         const entry = store.get(key);
         if (entry && entry.expires > now) return entry.promise;
+        // Keys with an open-ended range (e.g. a zoom window) would otherwise pile up.
+        for (const [k, e] of store) if (e.expires <= now) store.delete(k);
 
         const promise = fn().catch((err) => {
             store.delete(key);
