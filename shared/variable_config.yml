@@ -175,3 +175,31 @@ variables:
     colormapMin: 0.0001
     colormapMax: 6.5
     precision: 0.0001
+
+# Observation-only variables: measured by ship casts (and some sensors) but
+# not modelled. Same label fields as `variables`; no tile/colormap fields, and
+# GET /variables doesn't list them, so they never become a map layer or pass
+# the frontend's `isModelVariable()` test. GET /casts serves them alongside
+# the model variables a cast measures (api/modules/ship_casts.py).
+# precision here is only a display step (decimals to print).
+observed_variables:
+  nitrate:
+    name: "Nitrate + Nitrite"
+    short: "NO₃"
+    unit: "mmol/m³"
+    precision: 0.01
+  silicate:
+    name: "Silicate"
+    short: "Si"
+    unit: "mmol/m³"
+    precision: 0.01
+  phosphate:
+    name: "Phosphate"
+    short: "PO₄"
+    unit: "mmol/m³"
+    precision: 0.001
+  chlorophyll:
+    name: "Chlorophyll a"
+    short: "Chl"
+    unit: "mg/m³"
+    precision: 0.01

@@ -45,6 +45,24 @@
                                         Clear filters
                                     </UButton>
                                 </div>
+                                <USeparator />
+                                <!-- Not a filter: it changes what counts as one sensor
+                                     (utils/sensorMerge.ts), so it isn't in the badge count. -->
+                                <div class="flex flex-col gap-2">
+                                    <span class="oe-label">Merge deployments</span>
+                                    <p class="text-xs text-muted">
+                                        Show one operator's redeployments of a site as one sensor when they lie
+                                        within this distance and depth of each other. 0 m shows every deployment.
+                                    </p>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <UFormField label="Within (m)">
+                                            <UInputNumber v-model="mergeDistance" :min="0" :max="20000" :step="100" size="sm" />
+                                        </UFormField>
+                                        <UFormField label="Depth ± (m)">
+                                            <UInputNumber v-model="mergeDepth" :min="0" :max="50" :step="1" size="sm" :disabled="!mergeDistance" />
+                                        </UFormField>
+                                    </div>
+                                </div>
                             </div>
                         </template>
                     </UPopover>
@@ -76,7 +94,11 @@
                         <div class="srow__kv">
                             <span>Coverage</span><span class="oe-num">{{ formatDataRange(sensor) }}</span>
                             <span>Position</span><span class="oe-num">{{ coordTxt(sensor.latitude, sensor.longitude) }}</span>
-                            <span>Depth</span><span>{{ depth2txt(sensor) }}</span>
+                            <span>Depth</span><span>{{ depth2txt(sensor) }}<template v-if="sensor.members"> mean</template></span>
+                            <template v-if="sensor.members">
+                                <span>Deployments</span>
+                                <span class="oe-num" :title="sensor.members.map(m => m.name).join('\n')">{{ sensor.members.length }} · {{ memberDepthRange(sensor) }}</span>
+                            </template>
                             <span>Measures</span>
                             <span>
                                 <template v-for="(varKey, k) in modelVariablesOf(sensor.variables)" :key="varKey">
@@ -125,6 +147,40 @@
                             <div class="srow__acts">
                                 <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
                                     :to="`https://cproof.uvic.ca/gliderdata/deployments/${g.glider}/${g.id}/`" target="_blank">C-PROOF page</UButton>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- DFO IOS ship casts: too many to list (124k since 1930), so
+                     the group picks the period the map shows and details the
+                     selected cast; casts are picked on the map. -->
+                <template v-if="mainStore.castYears.length">
+                    <div class="sgroup oe-label">
+                        Ship casts · {{ mainStore.casts.length.toLocaleString('en-CA') }}<template v-if="mainStore.castsTruncated">+</template>
+                    </div>
+                    <div class="cast-period">
+                        <USelect v-model="castFrom" :items="castYearItems" size="xs" aria-label="First year of ship casts shown" />
+                        <span class="text-muted text-xs">to</span>
+                        <USelect v-model="castTo" :items="castYearItems" size="xs" aria-label="Last year of ship casts shown" />
+                        <span v-if="mainStore.castsTruncated" class="text-xs text-muted" title="The map shows the first 20,000; pick a shorter period">first 20,000</span>
+                    </div>
+                    <div v-if="selectedCast" class="srow srow--on" role="button" tabindex="0"
+                        @click="mainStore.setExploreView('cast')" @keydown.enter="mainStore.setExploreView('cast')">
+                        <span class="srow__dot srow__dot--historic" />
+                        <span class="srow__name">{{ selectedCast.mission || selectedCast.id }}</span>
+                        <span class="srow__depth oe-num">{{ Math.round(selectedCast.maxDepth) }} m</span>
+                        <span class="srow__sub oe-num">
+                            <span>DFO IOS</span>
+                            <span class="srow__vars">{{ selectedCast.variables.map(v => mainStore.castVariables[v]?.short ?? v).join(' ') }} · {{ selectedCast.kind === 'bottle' ? 'bottle' : 'CTD' }}</span>
+                            <span class="srow__age">{{ new Date(selectedCast.time).toLocaleDateString('en-CA') }}</span>
+                        </span>
+                        <div class="srow__detail" @click.stop>
+                            <div class="srow__kv">
+                                <span>Time</span><span class="oe-num">{{ new Date(selectedCast.time).toLocaleString('en-CA') }}</span>
+                                <span>Position</span><span class="oe-num">{{ coordTxt(selectedCast.lat, selectedCast.lon) }}</span>
+                                <span v-if="selectedCast.area">Area</span><span v-if="selectedCast.area">{{ selectedCast.area }}</span>
+                                <span>Profile</span><span class="oe-num">{{ selectedCast.id }}</span>
                             </div>
                         </div>
                     </div>
@@ -209,6 +265,36 @@ const activeFilterCount = computed(
 function clearFilters() {
     organizationFilter.value = [];
     variableFilter.value = [];
+}
+
+// Ship casts: the map shows one year range at a time (mainStore.castPeriod).
+const castYearItems = computed(() => [...mainStore.castYears].reverse().map(y => ({
+    value: y.year, label: `${y.year} (${(y.ctd + y.bottle).toLocaleString('en-CA')})`,
+})));
+const castFrom = computed({
+    get: () => mainStore.castPeriod?.[0],
+    set: (y: number | undefined) => { if (y != null) mainStore.setCastPeriod([y, mainStore.castPeriod?.[1] ?? y]); },
+});
+const castTo = computed({
+    get: () => mainStore.castPeriod?.[1],
+    set: (y: number | undefined) => { if (y != null) mainStore.setCastPeriod([mainStore.castPeriod?.[0] ?? y, y]); },
+});
+const selectedCast = computed(() => mainStore.casts.find(c => c.id === mainStore.selectedCastId) ?? null);
+
+const mergeDistance = computed({
+    get: () => mainStore.sensorMerge.distanceM,
+    set: (v: number | null) => mainStore.setSensorMerge({ ...mainStore.sensorMerge, distanceM: v ?? 0 }),
+});
+const mergeDepth = computed({
+    get: () => mainStore.sensorMerge.depthM,
+    set: (v: number | null) => mainStore.setSensorMerge({ ...mainStore.sensorMerge, depthM: v ?? 0 }),
+});
+
+/** A merge's member depths, e.g. "50–52 m", as each deployment recorded it. */
+function memberDepthRange(sensor: Sensor): string {
+    const depths = (sensor.members ?? []).map(m => m.depth);
+    const lo = Math.min(...depths), hi = Math.max(...depths);
+    return lo === hi ? `${lo.toFixed(0)} m` : `${lo.toFixed(0)}–${hi.toFixed(0)} m`;
 }
 
 const organizationOptions = computed(() => {
@@ -400,6 +486,14 @@ function openInfoDialog(sensor: typeof mainStore.sensors[number]) {
 
 .sgroup {
     padding: 10px 14px 6px;
+    border-bottom: 1px solid var(--ui-border-muted);
+}
+
+.cast-period {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
     border-bottom: 1px solid var(--ui-border-muted);
 }
 

@@ -24,6 +24,13 @@ takes the value of the highest-priority instrument that has one, in the order
 the sensor's catalog entry lists them (sensors.device_config.sources). Passing
 `instrument` returns that one instrument's series instead.
 
+A display-time merge of several fixed-depth sensors (redeployments of one
+site, joined by front/app/utils/sensorMerge.ts under the user's distance and
+depth tolerance) arrives as their ids joined by commas. It is read as one
+sensor: every member's rows under the variable, averaged per timestamp where
+deployments overlap, reported at the members' mean depth. Storage is never
+merged; see `sensor_ids()`.
+
 Returns a dict ready to serialize as a JSON response:
   {"time": [...], "value": [...]}
   {"time": [...], "depth": [...], "value": [...]}   — when depth data exists
@@ -33,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -48,10 +56,33 @@ def _fmt(dt_str: str) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def sensor_ids(sensor_id) -> list[str]:
+    """`sensor_id` as a list of ids: one sensor, or a display-time merge of
+    several, which the frontend sends as their ids joined by commas. Each id
+    is reduced to UUID characters, so the result is safe to quote into SQL."""
+    ids = [re.sub(r"[^0-9A-Za-z-]", "", part) for part in str(sensor_id).split(",")]
+    return [i for i in ids if i]
+
+
+def id_filter(sensor_id, column: str = "sensor_id") -> str:
+    """SQL matching `column` to the sensor, or to every member of a merge."""
+    ids = sensor_ids(sensor_id)
+    if len(ids) == 1:
+        return f"{column} = '{ids[0]}'"
+    quoted = ", ".join(f"'{i}'" for i in ids)
+    return f"{column} IN ({quoted})"
+
+
+def is_merged(sensor_id) -> bool:
+    return len(sensor_ids(sensor_id)) > 1
+
+
 def _is_profiler_sensor(client, sensor_id: str) -> bool:
-    safe_id = str(sensor_id).replace("'", "")
+    # A merge only ever joins fixed-depth sensors (sensorMerge.ts).
+    if is_merged(sensor_id):
+        return False
     rows = client.query(
-        f"SELECT depth FROM sensors FINAL WHERE id = '{safe_id}' LIMIT 1"
+        f"SELECT depth FROM sensors FINAL WHERE {id_filter(sensor_id, 'id')} LIMIT 1"
     ).result_rows
     return bool(rows) and float(rows[0][0]) == -1.0
 
@@ -59,8 +90,11 @@ def _is_profiler_sensor(client, sensor_id: str) -> bool:
 def source_rank_sql(client, sensor_id: str, variable: str) -> str:
     """SQL ranking a row's `source` by the sensor's priority order for
     `variable`: 1 for the first instrument, and past the end for one no longer
-    listed. Constant for single-source sensors (ERDDAP, most ONC)."""
-    safe_id = str(sensor_id).replace("'", "")
+    listed. Constant for single-source sensors (ERDDAP, most ONC), and for a
+    merge, whose members' instrument lists don't share one order."""
+    if is_merged(sensor_id):
+        return "0"
+    safe_id = sensor_ids(sensor_id)[0]
     rows = client.query(
         f"SELECT device_config FROM sensors FINAL WHERE id = '{safe_id}' LIMIT 1"
     ).result_rows
@@ -143,6 +177,11 @@ def extract_sensor_timeseries(
     # request but is already validated by the caller against the sensors table).
     safe_var = variable.replace("'", "''")
     safe_id  = str(sensor_id).replace("'", "")
+    where_id = id_filter(sensor_id)
+
+    if is_merged(sensor_id):
+        return _merged_series(client, where_id, sensor_id, variable, safe_var,
+                              from_str, to_str, with_depth=depth is not None)
 
     if depth is not None and _is_profiler_sensor(client, sensor_id):
         if source not in DATA_TABLE_BY_SOURCE:
@@ -156,7 +195,7 @@ def extract_sensor_timeseries(
 
         result = client.query(series_query(
             client, safe_id, variable, instrument,
-            f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+            f"{where_id} AND variable = '{safe_var}' "
             f"AND depth >= {lo} AND depth < {hi} "
             f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
             keys="time, depth", columns="time, value",
@@ -175,7 +214,7 @@ def extract_sensor_timeseries(
         instrument_where = f" AND source = '{instrument.replace(chr(39), chr(39) * 2)}'" if instrument else ""
         nearest_rows = client.query(
             f"SELECT depth FROM sensor_timeseries "
-            f"WHERE sensor_id = '{safe_id}' AND variable = '{safe_var}'{instrument_where} "
+            f"WHERE {where_id} AND variable = '{safe_var}'{instrument_where} "
             f"ORDER BY abs(depth - {float(depth)}) LIMIT 1"
         ).result_rows
         if not nearest_rows:
@@ -186,7 +225,7 @@ def extract_sensor_timeseries(
 
         result = client.query(series_query(
             client, safe_id, variable, instrument,
-            f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+            f"{where_id} AND variable = '{safe_var}' "
             f"AND depth = {target_depth} "
             f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
             keys="time", columns="time, value",
@@ -202,7 +241,7 @@ def extract_sensor_timeseries(
     # No depth filter — return all depth levels.
     result = client.query(series_query(
         client, safe_id, variable, instrument,
-        f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+        f"{where_id} AND variable = '{safe_var}' "
         f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
         keys="time, depth", columns="time, depth, value",
     ))
@@ -224,3 +263,28 @@ def extract_sensor_timeseries(
         return {"time": times_out, "value": values_out}
 
     return {"time": times_out, "depth": depths, "value": values_out}
+
+
+def _merged_series(client, where_id: str, sensor_id: str, variable: str, safe_var: str,
+                   from_str: str, to_str: str, with_depth: bool) -> dict:
+    """A display-time merge's series: every member's rows, one value per
+    timestamp (the mean where deployments overlap). With `with_depth` the
+    response carries the members' mean depth, as a fixed sensor's carries its
+    one stored depth."""
+    rows = client.query(
+        f"SELECT time, avg(value), avg(depth) FROM sensor_timeseries FINAL "
+        f"WHERE {where_id} AND variable = '{safe_var}' AND NOT isNaN(value) "
+        f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}') "
+        f"GROUP BY time ORDER BY time"
+    ).result_rows
+    if not rows:
+        if with_depth:
+            return {"time": [], "value": [], "depth": None}
+        raise FileNotFoundError(f"No data found for sensor {sensor_id}, variable '{variable}'")
+    out = {
+        "time": [r[0].strftime("%Y-%m-%dT%H:%M:%S") for r in rows],
+        "value": [float(r[1]) for r in rows],
+    }
+    if with_depth:
+        out["depth"] = round(sum(float(r[2]) for r in rows) / len(rows), 1)
+    return out

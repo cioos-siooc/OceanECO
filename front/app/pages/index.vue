@@ -215,6 +215,8 @@ import { resolveColormap } from '~~/composables/useColormapResolver'
 import { MAP_BOUNDS, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_STYLE, BASEMAP_PAINT, BASEMAP_FILLS, BASEMAP_HIDDEN_SOURCE_LAYERS } from '@/config/app'
 import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
+import { haversineM } from '@/utils/sensorMerge';
+import { addCastLayer, setCastLayerVisibility, setSelectedCast, CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
 import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
 import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
 import { fetchSeafloorGrid } from '~~/composables/useSeafloorGrid';
@@ -231,7 +233,7 @@ import SegmentedControl from '../components/ui/SegmentedControl.vue'
 
 ///////////////////////////////////  SETUP  ///////////////////////////////////
 
-import { useMainStore, type GliderDeployment } from '../stores/main'
+import { useMainStore, type GliderDeployment, type Sensor } from '../stores/main'
 import { trackEvent } from '~~/composables/useAnalytics'
 import { useRasterProbe } from '~~/composables/useRasterProbe'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
@@ -533,7 +535,10 @@ onMounted(async () => {
         Promise.all([init()]).catch((e) => console.warn('init failed:', e));
         addSensors()
             .catch((e) => console.warn('addSensors failed:', e))
-            .finally(() => addGliders().catch((e) => console.warn('addGliders failed:', e)));
+            .finally(() => {
+                addGliders().catch((e) => console.warn('addGliders failed:', e));
+                addCasts().catch((e) => console.warn('addCasts failed:', e));
+            });
 
         map?.on('zoom', () => {
             if (map) zoom.value = map.getZoom().toFixed(2);
@@ -601,6 +606,8 @@ onBeforeUnmount(() => {
         }
         // detach station handlers if attached
         try { const sd = (map as any).__stationsDetach; if (sd) sd(); } catch (e) { }
+        _castsDetach?.();
+        _castsDetach = null;
 
         // remove png overlay if present
         try { if (map.getLayer && map.getLayer('png-image-layer')) map.removeLayer('png-image-layer'); } catch (e) { }
@@ -1009,16 +1016,27 @@ function initClick(lat: number, lng: number) {
 const REALTIME_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 const PROXIMITY_M = 100; // sensors within 100 m share one map marker
 
-function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371000;
-    const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+/**
+ * Sensors sharing a map marker. The radius grows with the merge tolerance:
+ * a site's merged depths are each centred on their own members, so at a wide
+ * tolerance they can sit further apart than 100 m and would otherwise stack
+ * as separate, overlapping markers.
+ */
+function groupSensors(sensors: Sensor[]): Sensor[][] {
+    const radius = Math.max(PROXIMITY_M, mainStore.sensorMerge.distanceM);
+    const groups: Sensor[][] = [];
+    for (const s of sensors) {
+        const existing = groups.find(g =>
+            haversineM(g[0].latitude, g[0].longitude, s.latitude, s.longitude) < radius
+        );
+        if (existing) existing.push(s);
+        else groups.push([s]);
+    }
+    return groups;
 }
 
 let _sensorGroups: any[][] = [];
+let _groupedFrom: Sensor[] | null = null; // the mainStore.sensors list _sensorGroups was built from
 let _sensorIsRealtime: (s: any) => boolean = () => false;
 let _visibleSensorGroups: any[][] = []; // _sensorGroups filtered to mainStore.filteredSensors
 
@@ -1080,7 +1098,12 @@ function updateBuoyVarOpacity(selectedVar: string | null) {
 // Each group is trimmed down to only its filter-matching members, so clusters that survive
 // the filter don't still expose non-matching sensors when spiderfied.
 function applyBuoyFilters() {
-    if (!map || !_sensorGroups.length) return;
+    if (!map || !_groupedFrom) return;
+    // A merge-tolerance change rebuilds mainStore.sensors; regroup from it.
+    if (_groupedFrom !== mainStore.sensors) {
+        _sensorGroups = groupSensors(mainStore.sensors);
+        _groupedFrom = mainStore.sensors;
+    }
     const filteredIds = new Set(mainStore.filteredSensors.map((s: any) => s.id));
     _visibleSensorGroups = _sensorGroups
         .map(g => g.filter((s: any) => filteredIds.has(s.id)))
@@ -1094,17 +1117,12 @@ function applyBuoyFilters() {
 watch(() => mainStore.filteredSensors, applyBuoyFilters);
 
 async function addSensors() {
-    const sensors = await getSensors();
+    await getSensors();
     const now = Date.now();
 
-    const groups: any[][] = [];
-    for (const s of sensors) {
-        const existing = groups.find(g =>
-            haversineM(g[0].latitude, g[0].longitude, s.latitude, s.longitude) < PROXIMITY_M
-        );
-        if (existing) existing.push(s);
-        else groups.push([s]);
-    }
+    // The store's list, not the response: deployments are merged there.
+    const groups = groupSensors(mainStore.sensors);
+    _groupedFrom = mainStore.sensors;
 
     const sensorIsRealtime = (s: any) =>
         s.latest_data_at && (now - new Date(s.latest_data_at).getTime()) < REALTIME_THRESHOLD_MS;
@@ -1187,6 +1205,35 @@ async function addGliders() {
     updateGliderCurtain();
     updateGliderSeafloor();
 }
+
+// DFO IOS ship casts: the period's points (mainStore.castPeriod, a year range
+// picked in the sensor list), re-fetched whenever the period changes.
+async function addCasts() {
+    const r = await axios.get(`${apiBaseUrl}/casts/years`);
+    mainStore.setCastYears(r.data);
+    await loadCasts();
+}
+
+let _castsRequest = 0;
+let _castsDetach: (() => void) | null = null;
+async function loadCasts() {
+    const period = mainStore.castPeriod;
+    if (!map || !period) return;
+    const req = ++_castsRequest;
+    const r = await axios.get(`${apiBaseUrl}/casts`, {
+        params: { from: `${period[0]}-01-01`, to: `${period[1] + 1}-01-01` },
+    });
+    if (req !== _castsRequest) return; // a newer period was picked meanwhile
+    mainStore.setCasts(r.data);
+    const detach = addCastLayer(map, r.data.casts, (id) => mainStore.selectCast(id));
+    if (detach) _castsDetach = detach;
+    setSelectedCast(map, mainStore.selectedCastId);
+    setCastLayerVisibility(map, mainStore.showCastLayer);
+}
+
+watch(() => mainStore.castPeriod, () => loadCasts().catch((e) => console.warn('loadCasts failed:', e)));
+watch(() => mainStore.selectedCastId, (id) => setSelectedCast(map, id));
+watch(() => mainStore.showCastLayer, (visible: boolean) => setCastLayerVisibility(map, visible));
 
 // The selected glider's section, hung under its track when the map is tilted:
 // the whole deployment, or the stretch its Explore section is zoomed to, which
@@ -1533,6 +1580,9 @@ async function updatePngOverlay(sourceId = 'png-image', layerId = 'png-image-lay
         // Glider tracks/heads are handled by useGliderLayer's own click handler.
         const gliderLayers = GLIDER_CLICK_LAYERS.filter(id => map.getLayer(id));
         if (gliderLayers.length && map.queryRenderedFeatures(evt.point, { layers: gliderLayers }).length) return;
+        // So are ship casts, by useCastLayer's.
+        const castLayers = CAST_CLICK_LAYERS.filter(id => map.getLayer(id));
+        if (castLayers.length && map.queryRenderedFeatures(evt.point, { layers: castLayers }).length) return;
 
         if (features.length > 0) {
             // Sensor click is fully handled by useStationsInteraction → clickSensor.
@@ -1542,6 +1592,7 @@ async function updatePngOverlay(sourceId = 'png-image', layerId = 'png-image-lay
 
         mainStore.setSelectedSensor(null); // Clear selected sensor on map click
         mainStore.selectGlider(null);
+        mainStore.selectCast(null);
         sensorPicker.value.visible = false;
         mainStore.setLastClickedMapPoint({ lat, lng });
     };

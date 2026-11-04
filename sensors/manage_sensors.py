@@ -343,6 +343,37 @@ CREATE TABLE IF NOT EXISTS default.glider_profiles
 )
 ENGINE = MergeTree
 ORDER BY (deployment_id, variable, profile, depth);
+
+-- DFO IOS ship casts (ios_casts_to_ch.py): CTD and rosette-bottle profiles
+-- from CIOOS Pacific's IOS_CTD_Profiles / IOS_BOT_Profiles. One cast is one
+-- position at one moment, so like gliders they get their own tables rather
+-- than a `sensors` row each (~124k casts back to 1930).
+CREATE TABLE IF NOT EXISTS default.ship_casts
+(
+    cast_id          String,
+    dataset          LowCardinality(String),
+    kind             LowCardinality(String),
+    mission_id       String,
+    time             DateTime,
+    latitude         Float64,
+    longitude        Float64,
+    geographic_area  String,
+    max_depth        Float32,
+    variables        Array(LowCardinality(String)),
+    updated_at       DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY cast_id;
+
+CREATE TABLE IF NOT EXISTS default.ship_cast_values
+(
+    cast_id   String,
+    variable  LowCardinality(String),
+    depth     Float32                   CODEC(Gorilla(4),  ZSTD(4)),
+    value     Float32                   CODEC(Gorilla(4),  ZSTD(4))
+)
+ENGINE = MergeTree
+ORDER BY (cast_id, variable, depth);
 """
 
 
@@ -356,6 +387,8 @@ def cmd_setup(ch_client, _args):
     print("  default.sensor_timeseries")
     print("  default.glider_deployments")
     print("  default.glider_profiles")
+    print("  default.ship_casts")
+    print("  default.ship_cast_values")
     key = ch_client.query(
         "SELECT sorting_key FROM system.tables WHERE database = 'default' AND name = 'sensor_timeseries'"
     ).result_rows[0][0]
@@ -594,6 +627,13 @@ def cmd_import(ch_client, args):
             source["description"] = entry["description"]
         if entry.get("constraints"):
             source["constraints"] = entry["constraints"]
+        # archive: a delayed-mode record that never changes, harvested once
+        # (erddap_to_ch skips it on scheduled runs once it holds data).
+        if entry.get("archive"):
+            source["archive"] = True
+        # site: the operator's station code, a label for display-time merging.
+        if entry.get("site"):
+            source["site"] = str(entry["site"])
 
         sensor_id = existing[name] if (name in existing and args.overwrite) else str(uuid.uuid4())
         row = {

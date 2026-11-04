@@ -16,6 +16,7 @@ Usage
 -----
     uv run python sensors/erddap_to_ch.py              # all active ERDDAP sensors
     uv run python sensors/erddap_to_ch.py --sensor-id 5
+    uv run python sensors/erddap_to_ch.py --include-archived   # also archive sensors with data
 """
 
 import argparse
@@ -43,10 +44,18 @@ BATCH_SIZE = 50_000
 
 # ── CH helpers ────────────────────────────────────────────────────────────────
 
-def get_active_erddap_sensors(ch_client, sensor_id_filter: str | None) -> list[dict]:
+def get_active_erddap_sensors(ch_client, sensor_id_filter: str | None,
+                              include_archived: bool = False) -> list[dict]:
+    """Active ERDDAP sensors. An `archive` sensor (a delayed-mode record that
+    never changes, e.g. an IOS mooring deployment) is left out once it holds
+    data, so the hourly flow doesn't re-poll hundreds of finished files —
+    unless it's asked for by id or `include_archived` is set."""
     where = "JSONExtractString(source, 'api') = 'ERDDAP'"
     if sensor_id_filter is not None:
         where += f" AND id = '{sensor_id_filter}'"
+    elif not include_archived:
+        where += (" AND NOT (JSONExtractBool(source, 'archive')"
+                  " AND id IN (SELECT DISTINCT sensor_id FROM sensor_timeseries))")
     rows = ch_client.query(
         f"SELECT id, name, latitude, longitude, depth, variables, source FROM sensors FINAL "
         f"WHERE active = 1 AND {where}"
@@ -422,9 +431,9 @@ def store_sensor(ch_client, sensor: dict):
         print(f"  {erddap_col} → '{canonical}': {len(rows)} row(s) inserted")
 
 
-def fetch_and_store(sensor_id_filter: str | None = None):
+def fetch_and_store(sensor_id_filter: str | None = None, include_archived: bool = False):
     ch_client = get_ch_client()
-    sensors = get_active_erddap_sensors(ch_client, sensor_id_filter)
+    sensors = get_active_erddap_sensors(ch_client, sensor_id_filter, include_archived)
 
     if not sensors:
         print("No active ERDDAP sensors found in ClickHouse.")
@@ -442,5 +451,8 @@ def fetch_and_store(sensor_id_filter: str | None = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch ERDDAP sensor data → ClickHouse.")
     parser.add_argument("--sensor-id", type=str, default=None, metavar="UUID")
+    parser.add_argument("--include-archived", action="store_true",
+                        help="Also re-fetch archive sensors that already hold data "
+                             "(they are skipped by default).")
     args = parser.parse_args()
-    fetch_and_store(sensor_id_filter=args.sensor_id)
+    fetch_and_store(sensor_id_filter=args.sensor_id, include_archived=args.include_archived)

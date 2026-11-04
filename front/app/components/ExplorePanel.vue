@@ -8,6 +8,14 @@
       </template>
     </GliderSection>
 
+    <!-- So is a ship cast: one profile at one place and moment. -->
+    <CastProfile v-else-if="viewMode === 'cast' && mainStore.selectedCastId">
+      <template #views>
+        <SegmentedControl :model-value="viewMode" :items="exploreSubViews" size="xs" aria-label="Explore view"
+          @update:model-value="(v) => mainStore.setExploreView(v as typeof viewMode.value)" />
+      </template>
+    </CastProfile>
+
     <!-- No point picked yet — the whole view is keyed off one map coordinate. -->
     <div v-else-if="!point" class="flex flex-col items-center justify-center grow text-center px-6">
       <UIcon name="i-mdi-layers-search" class="size-[56px] text-gray-500" />
@@ -160,6 +168,7 @@ import TimeControls from './TimeControls.vue'
 import ChartContextBar, { type ContextItem } from './ChartContextBar.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import GliderSection from './glider/GliderSection.vue'
+import CastProfile from './cast/CastProfile.vue'
 import { toCalendarDate, fromCalendarDate } from '~~/composables/useCalendarDate'
 
 /**
@@ -412,6 +421,7 @@ const exploreSubViews = computed(() => {
       title: hasProfiler ? "The sensor's own depth section" : 'Select a profiling sensor first',
     },
     ...(mainStore.selectedGliderId ? [{ value: 'glider', label: 'Glider', title: 'The selected glider deployment along its track' }] : []),
+    ...(mainStore.selectedCastId ? [{ value: 'cast', label: 'Cast', title: 'The selected ship cast’s profiles' }] : []),
   ]
 })
 // Losing the profiler strands sensor-depth with nothing to draw.

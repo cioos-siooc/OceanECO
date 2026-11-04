@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from modules.extract_depth_profile import extract_depth_profile
 from modules.extract_cross_section import extract_cross_section
 from modules.point_snapshot import extract_point_snapshot
 from modules.gliders import list_gliders, extract_glider_section
+from modules.ship_casts import cast_years, list_casts, cast_profile
 from modules.extract_image import generate_image
 from modules.ocean_analysis import lookup_grid_cells_for_polygon, lookup_nearest_grid_cell, query_region_timeseries
 from modules.sync_hourly import import_native_file, import_daily_native_file, SyncConflict, SyncError, SYNC_API_TOKEN
@@ -266,6 +267,53 @@ async def get_glider_section(request: gliderSectionRequest, http: Request):
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         logger.exception("get_glider_section failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+#######################################
+
+@app.get("/casts/years")
+async def get_cast_years():
+    """IOS ship-cast counts per year and kind (CTD / bottle), for the layer's period picker."""
+    try:
+        return await run_in_threadpool(cast_years)
+    except Exception as exc:
+        logger.exception("get_cast_years failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/casts")
+async def get_casts(request: Request, from_: str = Query(..., alias="from"), to: str = Query(...)):
+    """IOS ship casts with `from <= time < to` (ISO dates), plus labels for their variables."""
+    try:
+        return _gzip_json(request, await run_in_threadpool(list_casts, from_, to))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("get_casts failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class castProfileRequest(BaseModel):
+    castId: str
+    # Model to compare with, and the one variable to read from it; omit both
+    # for the cast alone. `model` is null (with `modelError`) where the model
+    # has no data at the cast.
+    source: Optional[str] = None
+    modelVar: Optional[str] = None
+
+@app.post("/castProfile")
+async def get_cast_profile(request: castProfileRequest, http: Request):
+    """One IOS ship cast: every variable's profile, optionally with the model's profile there."""
+    try:
+        result = await asyncio.wait_for(
+            run_in_threadpool(cast_profile, request.castId, request.source, request.modelVar),
+            timeout=THREADPOOL_TIMEOUT,
+        )
+        return _gzip_json(http, result)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.exception("get_cast_profile failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 #######################################

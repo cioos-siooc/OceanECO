@@ -59,8 +59,12 @@ export interface SharedState {
     pt?: [number, number]
     /** selected glider deployment, plus its section's profile window when zoomed */
     gl?: [string] | [string, number, number]
+    /** selected ship cast */
+    ca?: string
+    /** ship-cast layer's year range, inclusive */
+    cy?: [number, number]
     tab?: 'explore' | 'analysis' | 'comparison' | 'crossSection'
-    ev?: 'series' | 'model-depth' | 'sensor-depth'
+    ev?: 'series' | 'model-depth' | 'sensor-depth' | 'glider' | 'cast'
     bin?: BinMode
     /** Explore's time-depth window anchor (windowEnd), epoch ms */
     we?: number
@@ -88,6 +92,8 @@ export interface SharedState {
     }
     /** sensor list filters */
     f?: { q?: string, o?: string[], v?: string[] }
+    /** display-time deployment merge tolerance, [distance m, depth m] */
+    sm?: [number, number]
     /**
      * Per-view control state, namespaced by owning component — analysis
      * thresholds, chosen secondary variables, chart zoom extents. Opaque here
@@ -164,6 +170,8 @@ export function captureShareState(): SharedState {
         gl: s.selectedGliderId
             ? (s.gliderRange ? [s.selectedGliderId, ...s.gliderRange] : [s.selectedGliderId])
             : undefined,
+        ca: s.selectedCastId ?? undefined,
+        cy: s.castPeriod ?? undefined,
         as: s.analysisSource,
         at: s.analysisTab,
         ase: s.analysisSeason,
@@ -188,6 +196,7 @@ export function captureShareState(): SharedState {
             o: [...s.sensorOrganizationFilter],
             v: [...s.sensorVariableFilter],
         }),
+        sm: [s.sensorMerge.distanceM, s.sensorMerge.depthM],
         // Only scopes a view has actually written exist here, so an untouched
         // tab costs nothing.
         vs: captureViewState(s.viewState),
@@ -226,6 +235,9 @@ export function applyShareState(state: SharedState): void {
     // Set directly rather than through `selectSensor`, which snaps the map's
     // depth to the nearest model level and pushes a snack explaining the move
     // — both wrong here: the shared depth is already what the sender saw.
+    // Before the selection: a merged sensor's id only exists under the
+    // tolerance that produced it (rebuildSensors re-resolves it either way).
+    if (state.sm) s.setSensorMerge({ distanceM: state.sm[0], depthM: state.sm[1] })
     if (state.sen) s.setSelectedSensor({ id: state.sen[0], depth: state.sen[1] })
 
     // Direct, like the sensor: the shared Explore view already says where it shows.
@@ -233,6 +245,10 @@ export function applyShareState(state: SharedState): void {
         s.selectedGliderId = state.gl[0]
         s.gliderRange = state.gl.length === 3 ? [state.gl[1], state.gl[2]] : null
     }
+
+    // Direct, like the glider: the shared Explore view already says where it shows.
+    if (state.ca) s.selectedCastId = state.ca
+    if (state.cy) s.setCastPeriod(state.cy)
 
     if (state.xs?.length) s.setCrossSectionLine(state.xs.map(([lat, lng]) => ({ lat, lng })))
 

@@ -38,3 +38,56 @@ def test_merged_query_takes_one_value_per_key():
 def test_instrument_query_filters_to_that_source():
     q = series_query(FakeClient(CRIP), "id", "temperature", "CRIP.C1/CTD", "x = 1", keys="time", columns="time, value")
     assert "source = 'CRIP.C1/CTD'" in q and "argMin" not in q
+
+
+# ── Display-time merges (comma-joined ids) ─────────────────────────────────────
+
+from datetime import datetime
+
+import extractSensorTimeseries as est
+from extractSensorTimeseries import id_filter, is_merged, sensor_ids
+
+
+def test_sensor_ids_split_and_sanitise():
+    assert sensor_ids("a-1") == ["a-1"]
+    assert sensor_ids("a-1, b-2,") == ["a-1", "b-2"]
+    assert sensor_ids("a'; DROP--,b") == ["aDROP--", "b"]
+
+
+def test_id_filter_single_and_merged():
+    assert id_filter("a-1") == "sensor_id = 'a-1'"
+    assert id_filter("a-1,b-2", "id") == "id IN ('a-1', 'b-2')"
+    assert is_merged("a,b") and not is_merged("a")
+
+
+def test_merged_rank_is_constant():
+    assert source_rank_sql(FakeClient(CRIP), "a,b", "temperature") == "0"
+
+
+class RowsClient:
+    def __init__(self, rows):
+        self.rows, self.queries = rows, []
+
+    def query(self, q):
+        self.queries.append(q)
+        rows = self.rows
+
+        class R:
+            result_rows = rows
+        return R
+
+
+def test_merged_series_averages_overlaps_and_reports_mean_depth(monkeypatch):
+    client = RowsClient([(datetime(2022, 1, 1, 0), 9.0, 50.0), (datetime(2022, 1, 1, 1), 9.5, 52.0)])
+    monkeypatch.setattr(est, "get_ch_client", lambda: client)
+    out = est.extract_sensor_timeseries("a,b", "temperature", "2022-01-01", "2022-01-02", depth=51.0)
+    assert out == {"time": ["2022-01-01T00:00:00", "2022-01-01T01:00:00"], "value": [9.0, 9.5], "depth": 51.0}
+    q = client.queries[0]
+    assert "sensor_id IN ('a', 'b')" in q and "avg(value)" in q and "GROUP BY time" in q
+
+
+def test_merged_series_without_depth_omits_it(monkeypatch):
+    client = RowsClient([(datetime(2022, 1, 1, 0), 9.0, 50.0)])
+    monkeypatch.setattr(est, "get_ch_client", lambda: client)
+    out = est.extract_sensor_timeseries("a,b", "temperature", "2022-01-01", "2022-01-02")
+    assert "depth" not in out and out["value"] == [9.0]

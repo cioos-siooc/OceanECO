@@ -2,10 +2,37 @@ import type moment from 'moment';
 import { defineStore } from 'pinia'
 import { chart as chartPalette } from '@/config/palette';
 import { trackEvent } from '~~/composables/useAnalytics';
+import { mergeSensors, resolveMergedId, type MergeableSensor } from '@/utils/sensorMerge';
 
 // Depths are plain numbers (the WebP filename stem too, e.g. 18.0 -> "18.0.webp")
 // — -1 is the synthetic bottom-layer sentinel ("bottom.webp").
-export type ExploreView = 'series' | 'model-depth' | 'sensor-depth' | 'glider'
+export type ExploreView = 'series' | 'model-depth' | 'sensor-depth' | 'glider' | 'cast'
+
+/** A sensor as `GET /sensors` returns it, or a display-time merge of several (`members`). */
+export type Sensor = MergeableSensor
+
+/** One DFO IOS ship cast (CTD or rosette bottle), as `GET /casts` lists it. */
+export interface ShipCast {
+    id: string
+    kind: 'ctd' | 'bottle'
+    time: string
+    lat: number
+    lon: number
+    mission: string
+    area: string
+    maxDepth: number
+    variables: string[]
+}
+
+/** Labels for a cast variable, from the registry's model or observation-only section. */
+export interface CastVariableMeta {
+    name: string
+    short: string
+    unit: string
+    precision: number | null
+    /** In the model registry: has a model counterpart and a display unit preference. */
+    modelled: boolean
+}
 
 /** One C-PROOF glider deployment, as `GET /gliders` returns it. */
 export interface GliderDeployment {
@@ -85,7 +112,15 @@ function createInitialState() {
          */
         midDate: null as moment.Moment | null,
 
-        sensors: [] as Array<{ id: string, name: string, latitude: number, longitude: number, depth: number, depth_min: number | null, depth_max: number | null, device_config: {}, variables: {}, active: boolean, first_data_at: string | null, latest_data_at: string | null, source: { api?: string, link?: string, description?: string }, organization: string }>,
+        // Sensors as stored (`GET /sensors`), and the list every view reads:
+        // `rawSensors` with redeployments joined under `sensorMerge`
+        // (utils/sensorMerge.ts). Rebuilt by `setSensors`/`setSensorMerge`.
+        rawSensors: [] as Sensor[],
+        sensors: [] as Sensor[],
+        // Display-time merge tolerance: deployments of one operator and dataset
+        // within `distanceM` and ±`depthM` of a group's reference are shown as
+        // one sensor. distanceM 0 shows every deployment on its own.
+        sensorMerge: { distanceM: 500, depthM: 5 },
         selectedSensor: {} as { id: string, depth: number } | null,
         // Sensor under the pointer in the sensor list; the map highlights its marker.
         hoveredSensorId: null as string | null,
@@ -107,6 +142,17 @@ function createInitialState() {
         showSeafloor: true,
         // With a glider selected, the other tracks are faded; false hides them.
         showOtherGliders: true,
+        // DFO IOS ship casts (`GET /casts`): one period's points at a time, as
+        // the archive (124k casts since 1930) is too many to draw at once.
+        casts: [] as ShipCast[],
+        castsTruncated: false,
+        castVariables: {} as Record<string, CastVariableMeta>,
+        castYears: [] as Array<{ year: number, ctd: number, bottle: number }>,
+        // Inclusive year range the map shows; null until `/casts/years`
+        // answers, then the latest year with casts.
+        castPeriod: null as [number, number] | null,
+        selectedCastId: null as string | null,
+        showCastLayer: true,
 
         // Sensor panel filters — shared with the map so markers stay in sync with the sensor list.
         sensorSearchQuery: '' as string,
@@ -338,13 +384,68 @@ export const useMainStore = defineStore('main', {
             this.midDate = date;
         },
 
-        setSensors(sensors: Array<{ id: string, name: string, latitude: number, longitude: number, depth: number, depth_min: number | null, depth_max: number | null, device_config: {}, variables: {}, active: boolean, first_data_at: string | null, latest_data_at: string | null, source: { api?: string, link?: string, description?: string }, organization: string }>) {
-            this.sensors = sensors;
+        setSensors(sensors: Sensor[]) {
+            this.rawSensors = sensors;
+            this.rebuildSensors();
+        },
+        setSensorMerge(merge: { distanceM: number, depthM: number }) {
+            this.sensorMerge = { distanceM: Math.max(0, merge.distanceM), depthM: Math.max(0, merge.depthM) };
+            this.rebuildSensors();
+        },
+        /** Re-merge `rawSensors`, carrying the selection over to whichever entry now holds it. */
+        rebuildSensors() {
+            this.sensors = mergeSensors(this.rawSensors, this.sensorMerge);
+            // Before the list first arrives a selection (e.g. from a share link)
+            // can't be resolved yet; leave it for the next rebuild.
+            if (!this.sensors.length) return;
+            const sel = this.selectedSensor;
+            if (sel?.id) {
+                const id = resolveMergedId(this.sensors, sel.id);
+                if (id !== sel.id) {
+                    const s = id ? this.sensors.find(x => x.id === id) : null;
+                    this.selectedSensor = s ? { id: s.id, depth: s.depth } : null;
+                }
+            }
+            if (this.hoveredSensorId && !this.sensors.some(s => s.id === this.hoveredSensorId)) {
+                this.hoveredSensorId = null;
+            }
         },
         setSelectedSensor(sensor: { id: string, depth: number } | null) {
             this.selectedSensor = sensor;
-            // One observation selected at a time: a sensor replaces the glider.
+            // One observation selected at a time: a sensor replaces the glider or cast.
             if (sensor && this.selectedGliderId) this.selectGlider(null);
+            if (sensor && this.selectedCastId) this.selectCast(null);
+        },
+        setCasts(payload: { casts: ShipCast[], truncated: boolean, variables: Record<string, CastVariableMeta> }) {
+            this.casts = payload.casts;
+            this.castsTruncated = payload.truncated;
+            this.castVariables = payload.variables;
+        },
+        setCastYears(years: Array<{ year: number, ctd: number, bottle: number }>) {
+            this.castYears = years;
+            if (!this.castPeriod && years.length) {
+                const latest = years[years.length - 1]!.year;
+                this.castPeriod = [latest, latest];
+            }
+        },
+        setCastPeriod(period: [number, number]) {
+            const [a, b] = period;
+            this.castPeriod = a <= b ? [a, b] : [b, a];
+        },
+        setShowCastLayer(value: boolean) {
+            this.showCastLayer = value;
+        },
+        /** Select a ship cast (or clear with null) and show its profiles in Explore. */
+        selectCast(id: string | null) {
+            if (id && id !== this.selectedCastId) trackEvent('cast_selected', { cast: id });
+            this.selectedCastId = id;
+            if (id) {
+                if (this.selectedSensor?.id) this.selectedSensor = null;
+                if (this.selectedGliderId) this.selectGlider(null);
+                this.setExploreView('cast');
+                if (this.activeBottomTab !== 'explore') this.setActiveBottomTab('explore');
+            }
+            else if (this.exploreView === 'cast') this.setExploreView('series');
         },
         setGliders(gliders: GliderDeployment[]) {
             this.gliders = gliders;
@@ -355,6 +456,7 @@ export const useMainStore = defineStore('main', {
             if (id !== this.selectedGliderId) this.gliderRange = null;
             this.selectedGliderId = id;
             if (id) {
+                if (this.selectedCastId) this.selectedCastId = null;
                 this.setExploreView('glider');
                 if (this.activeBottomTab !== 'explore') this.setActiveBottomTab('explore');
             }

@@ -33,7 +33,7 @@ from modules.extractTimeseries import (
     _find_nearest_grid_point,
     _resolve_depth,
 )
-from modules.extractSensorTimeseries import extract_sensor_timeseries
+from modules.extractSensorTimeseries import extract_sensor_timeseries, id_filter
 
 # Fixed order so the response (and the frontend's cards) read the same way
 # every time; matches variable_config.yml.
@@ -100,11 +100,10 @@ def _model_snapshot(client, source: str, lat: float, lon: float, depth: float,
 def _sensor_variables(client, sensor_id: str) -> list[str]:
     """The snapshot variables this sensor measures, in snapshot order
     (keys of `sensors.variables`, which are canonical variable ids)."""
-    safe_id = str(sensor_id).replace("'", "")
     rows = client.query(
-        f"SELECT variables FROM sensors FINAL WHERE id = '{safe_id}' LIMIT 1"
+        f"SELECT variables FROM sensors FINAL WHERE {id_filter(sensor_id, 'id')}"
     ).result_rows
-    have = set(json.loads(rows[0][0]).keys()) if rows and rows[0][0] else set()
+    have = {k for (v,) in rows if v for k in json.loads(v)}
     return [v for v in SNAPSHOT_VARIABLES if v in have]
 
 
@@ -112,12 +111,11 @@ def _last_reading(client, sensor_id: str, variable: str, near_depth: Optional[fl
     """The most recent value on record (any instrument). `near_depth` limits a
     profiler to casts near the level being read; a fixed sensor has one depth,
     so it is read unfiltered (its stored depth needn't match the catalog's)."""
-    safe_id = str(sensor_id).replace("'", "")
     safe_var = variable.replace("'", "''")
     depth_where = f" AND abs(depth - {float(near_depth)}) < 5" if near_depth is not None else ""
     rows = client.query(
         f"SELECT max(time), argMax(value, time) FROM sensor_timeseries "
-        f"WHERE sensor_id = '{safe_id}' AND variable = '{safe_var}'{depth_where} AND NOT isNaN(value)"
+        f"WHERE {id_filter(sensor_id)} AND variable = '{safe_var}'{depth_where} AND NOT isNaN(value)"
     ).result_rows
     if not rows or rows[0][0] is None or pd.Timestamp(rows[0][0]).year < 1971:
         return None

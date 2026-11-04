@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from modules.clickhouse_helpers import get_ch_client
-from modules.extractSensorTimeseries import series_query
+from modules.extractSensorTimeseries import id_filter, series_query
 from modules.extractTimeseries import (
     ALLOWED_VARIABLES,
     DATA_TABLE_BY_SOURCE,
@@ -267,7 +267,7 @@ def extract_depth_profile(
         safe_id = str(sensor_id).replace("'", "")
         sensor_rows = client.query(series_query(
             client, safe_id, var, None,
-            f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+            f"{id_filter(sensor_id)} AND variable = '{safe_var}' "
             f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
             keys="time, depth", columns="time, depth, value",
         )).result_rows

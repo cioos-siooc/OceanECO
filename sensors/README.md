@@ -140,6 +140,9 @@ sensors:
 | `unit` | Display unit string (e.g. `ml/L`) |
 | `factor` | Raw value is multiplied by this before storage — `1.0` if no conversion is needed |
 | `code` | ERDDAP only: the dataset's column. `time`/`depth` entries rename the axis columns; a `depth` with `unit: dbar` is pressure, converted at ingestion |
+| `constraints` | ERDDAP only: extra tabledap constraints appended to every fetch, for datasets holding many stations (`STN_ID="C46146"`, `filename="a1_….ctd"`) |
+| `archive` | `true` for a delayed-mode record that never changes: the scheduled harvest skips it once it holds data (`erddap_to_ch.py --include-archived` re-fetches) |
+| `site` | The operator's station code (IOS `A1`, `SOGS`), the label for deployments merged at display time |
 | `sources` | ONC only: `LOCATION/DEVICE_CATEGORY/sensor_code` for each instrument that reports the variable, highest priority first. The code can differ per instrument (e.g. `oxygen` on a WQM, `oxygen_corrected` on an optode) |
 
 **Several sources.** ONC sites often have instruments on child locations (`CRIP.C1`, `CRIP.C2`) that come and go between deployments. `onc_to_ch.py` stores every source as its own series, tagged in `sensor_timeseries.source` (`CRIP.C1/CTD`; part of the table key) and resumed from its own last timestamp. A source with no deployment in the requested window is skipped silently. Readers merge them: `/sensorTimeseries` and `/depthProfile` give each timestamp the value of the first source in the list that has one, and `/sensorTimeseries` with `instrument` returns one source's series, which Explore's "Compare instruments" toggle plots side by side. Profilers (`depth: -1`) harvest only each variable's first source, which must be at `location_code`.
@@ -219,6 +222,28 @@ docker compose -f docker-compose.prod.api.yml run --rm sensors \
 ```
 
 The `add` command prints the generated UUID and the exact backfill command to run next.
+
+### DFO IOS moorings and ship casts (CIOOS Pacific)
+
+`catalog_ios.yml` is generated, not hand-written: one sensor per IOS mooring instrument deployment (one `.ctd` file), all `archive: true`. Regenerate and import it with:
+
+```bash
+uv run python discover_ios_moorings.py > catalog_ios.yml
+uv run python manage_sensors.py import --file catalog_ios.yml
+uv run python erddap_to_ch.py      # harvests archive sensors that hold no data yet
+```
+
+Deployments are never merged in storage; the frontend joins a site's redeployments under a user-set distance/depth tolerance.
+
+Ship casts (CTD and rosette bottles, back to 1930) go to their own tables, `ship_casts` + `ship_cast_values` (`manage_sensors.py setup` creates them), through a CLI with no Prefect flow yet:
+
+```bash
+uv run python ios_casts_to_ch.py --year 2024                  # both datasets, one year
+uv run python ios_casts_to_ch.py --dataset IOS_CTD_Profiles   # the whole archive (hours)
+uv run python ios_casts_to_ch.py --since 2024                 # pick up new casts
+```
+
+Running any harvester from a host shell rather than the container: set `TZ=UTC` for `erddap_to_ch.py`/`onc_to_ch.py`. `clickhouse-connect` reads their naive-UTC datetimes as local time, so on a non-UTC host every row shifts by the offset. `ios_casts_to_ch.py` writes aware UTC and doesn't need it.
 
 ---
 

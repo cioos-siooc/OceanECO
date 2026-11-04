@@ -1,6 +1,7 @@
 import gsw
 import pytest
 
+import erddap_to_ch
 from erddap_to_ch import PRESSURE_UNITS, depth_axis_unit, resolve_depth_value
 
 
@@ -48,3 +49,29 @@ def test_depth_axis_unit_reads_declared_unit():
 def test_pressure_units_set_is_case_handled_by_callers():
     # resolve_depth_value lowercases before checking; the set itself stays lowercase
     assert PRESSURE_UNITS == {"dbar", "decibar"}
+
+
+class _Capture:
+    def __init__(self):
+        self.sql = None
+
+    def query(self, sql):
+        self.sql = sql
+
+        class R:
+            result_rows = []
+        return R
+
+
+def test_scheduled_runs_skip_archive_sensors_that_hold_data():
+    c = _Capture()
+    erddap_to_ch.get_active_erddap_sensors(c, None)
+    assert "JSONExtractBool(source, 'archive')" in c.sql
+
+
+def test_archive_sensors_are_fetched_when_asked_for():
+    c = _Capture()
+    erddap_to_ch.get_active_erddap_sensors(c, "some-id")
+    assert "archive" not in c.sql
+    erddap_to_ch.get_active_erddap_sensors(c, None, include_archived=True)
+    assert "archive" not in c.sql
