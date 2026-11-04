@@ -27,6 +27,23 @@ export interface GliderDeployment {
     track: [number, number][]
 }
 
+/** The sensor list's search + organization/variable filters, shared by the
+ *  store's filteredSensors (which the map's markers follow) and sensorInfo.vue's
+ *  "N stations match" hint for a query typed in the Gliders tab. */
+export function sensorMatches(
+    sensor: { name: string, organization?: string | null, variables?: Record<string, unknown> | null },
+    query: string, organizations: string[], variables: string[],
+): boolean {
+    const q = query.trim().toLowerCase();
+    if (q && !sensor.name.toLowerCase().includes(q) && !(sensor.organization ?? '').toLowerCase().includes(q)) return false;
+    if (organizations.length && !organizations.includes(sensor.organization ?? '')) return false;
+    if (variables.length) {
+        const sensorVars = Object.keys(sensor.variables ?? {});
+        if (!variables.some(v => sensorVars.includes(v))) return false;
+    }
+    return true;
+}
+
 export function formatDepthLabel(depth: number): string {
     return depth === -1 ? 'bottom' : depth.toFixed(1);
 }
@@ -252,20 +269,7 @@ export const useMainStore = defineStore('main', {
         },
 
         filteredSensors(state) {
-            const q = state.sensorSearchQuery.trim().toLowerCase();
-            return state.sensors.filter((sensor) => {
-                if (q && !sensor.name.toLowerCase().includes(q) && !(sensor.organization ?? '').toLowerCase().includes(q)) {
-                    return false;
-                }
-                if (state.sensorOrganizationFilter.length && !state.sensorOrganizationFilter.includes(sensor.organization)) {
-                    return false;
-                }
-                if (state.sensorVariableFilter.length) {
-                    const sensorVars = Object.keys(sensor.variables ?? {});
-                    if (!state.sensorVariableFilter.some(v => sensorVars.includes(v))) return false;
-                }
-                return true;
-            });
+            return state.sensors.filter(s => sensorMatches(s, state.sensorSearchQuery, state.sensorOrganizationFilter, state.sensorVariableFilter));
         },
     },
 

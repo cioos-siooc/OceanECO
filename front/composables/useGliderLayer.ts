@@ -29,6 +29,8 @@ const SELECTED_OPACITY = 1;
 const SELECTED_DIMMED_OPACITY = 0.35;
 // The other deployments' tracks and heads while one is selected.
 const OTHERS_OPACITY = 0.1;
+// Every track but the hovered one, while a deployment is hovered in the sensor list.
+const HOVER_OTHERS_OPACITY = 0.2;
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 const IMG = { live: 'glider-live', historic: 'glider-historic' } as const;
@@ -118,7 +120,7 @@ export async function addGliderLayer(
         map.addLayer({
             id: LAYER_TRACK_HOVER, type: 'line', source: SOURCE_TRACKS, filter: NONE,
             layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': chart.sensor, 'line-width': 9, 'line-opacity': 0.45, 'line-blur': 4 },
+            paint: { 'line-color': ACCENT, 'line-width': 3 },
         }, before);
         map.addLayer({
             id: LAYER_TRACK_SELECTED, type: 'line', source: SOURCE_TRACKS, filter: NONE,
@@ -168,25 +170,44 @@ export function setGliderLayerVisibility(map: any, visible: boolean) {
     }
 }
 
+// Module state so hover and selection compose: hover fades everything but the
+// hovered track, and leaving restores the selection's own fading.
+let selectedId: string | null = null;
+let hoveredId: string | null = null;
+let selectedBaseOpacity = SELECTED_OPACITY;
+
+function applyOpacity(map: any) {
+    const focus = hoveredId ?? selectedId;
+    const others = hoveredId ? HOVER_OTHERS_OPACITY : OTHERS_OPACITY;
+    const opacity = focus ? ['case', ['==', ['get', 'id'], focus], 1, others] : 1;
+    map.setPaintProperty(LAYER_TRACK_CASING, 'line-opacity', opacity);
+    map.setPaintProperty(LAYER_TRACK, 'line-opacity', opacity);
+    map.setPaintProperty(LAYER_HEAD, 'icon-opacity', opacity);
+    const hoveringOther = hoveredId && hoveredId !== selectedId;
+    map.setPaintProperty(LAYER_TRACK_SELECTED, 'line-opacity', hoveringOther ? HOVER_OTHERS_OPACITY : selectedBaseOpacity);
+    map.setPaintProperty(LAYER_TRACK_RANGE, 'line-opacity', hoveringOther ? HOVER_OTHERS_OPACITY : 1);
+}
+
 /**
  * Highlight the selected deployment's track (or clear with null) and fade the
  * others, or hide them altogether when `hideOthers`.
  */
 export function setSelectedGlider(map: any, id: string | null, hideOthers = false) {
     if (!map?.getLayer(LAYER_TRACK_SELECTED)) return;
+    selectedId = id;
     const isSelected = ['==', ['get', 'id'], id ?? '__none__'];
-    const opacity = id ? ['case', isSelected, 1, OTHERS_OPACITY] : 1;
     const filter = id && hideOthers ? isSelected : null;
     map.setFilter(LAYER_TRACK_SELECTED, id ? isSelected : NONE);
     for (const layer of [LAYER_TRACK_CASING, LAYER_TRACK, LAYER_HEAD]) map.setFilter(layer, filter);
-    map.setPaintProperty(LAYER_TRACK_CASING, 'line-opacity', opacity);
-    map.setPaintProperty(LAYER_TRACK, 'line-opacity', opacity);
-    map.setPaintProperty(LAYER_HEAD, 'icon-opacity', opacity);
+    applyOpacity(map);
 }
 
-/** Glow the hovered deployment's track (or clear with null). */
+/** Glow the hovered deployment's track and fade the rest (or restore with null). */
 export function setHoveredGlider(map: any, id: string | null) {
-    if (map?.getLayer(LAYER_TRACK_HOVER)) map.setFilter(LAYER_TRACK_HOVER, id ? ['==', ['get', 'id'], id] : NONE);
+    if (!map?.getLayer(LAYER_TRACK_HOVER)) return;
+    hoveredId = id;
+    map.setFilter(LAYER_TRACK_HOVER, id ? ['==', ['get', 'id'], id] : NONE);
+    applyOpacity(map);
 }
 
 /**
@@ -199,5 +220,6 @@ export function setGliderRangeTrack(map: any, coords: [number, number][] | null)
     src.setData(coords && coords.length > 1
         ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }
         : EMPTY);
-    map.setPaintProperty(LAYER_TRACK_SELECTED, 'line-opacity', coords ? SELECTED_DIMMED_OPACITY : SELECTED_OPACITY);
+    selectedBaseOpacity = coords ? SELECTED_DIMMED_OPACITY : SELECTED_OPACITY;
+    applyOpacity(map);
 }

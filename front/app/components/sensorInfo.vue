@@ -1,19 +1,28 @@
 <template>
     <div class="sensors">
-        <div v-if="sensors.length === 0" class="p-4 text-muted">No sensors found.</div>
+        <div v-if="sensors.length === 0 && mainStore.gliders.length === 0" class="p-4 text-muted">No sensors found.</div>
         <template v-else>
-            <!-- Search, filters and sort stay pinned; only the list scrolls. The
-                 two dropdown filters live in a popover so the list starts higher,
-                 and the badge says a filter is on while it's shut. -->
+            <!-- Tabs, search, filters and sort stay pinned; only the list scrolls.
+                 Each instrument kind gets a tab, and the eye beside the tabs is
+                 the only place its map layer is switched (LAYERS doesn't repeat
+                 it). The two dropdown filters live in a popover so the list starts
+                 higher, and the badge says a filter is on while it's shut. -->
             <div class="sensors__head">
-                <div class="flex items-center justify-between">
-                    <span class="oe-label">Sensors · {{ filteredSensors.length }}</span>
-                    <USelect v-model="sortMode" :items="sortItems" size="xs" variant="ghost"
-                        class="sensors__sort" aria-label="Sort sensors" />
+                <div class="flex items-center gap-1">
+                    <SegmentedControl v-model="kind" :items="kindItems" size="xs" block class="grow"
+                        aria-label="Instrument type" />
+                    <UButton size="xs" variant="ghost" color="neutral" class="shrink-0"
+                        :icon="kindLayerOn ? 'i-mdi-eye-outline' : 'i-mdi-eye-off-outline'"
+                        :aria-pressed="kindLayerOn"
+                        :aria-label="`${kindLayerOn ? 'Hide' : 'Show'} ${kind} on the map`"
+                        :title="`${kindLayerOn ? 'Hide' : 'Show'} ${kind} on the map`"
+                        @click="toggleKindLayer" />
                 </div>
                 <div class="flex items-center gap-1">
-                    <UInput v-model="searchQuery" icon="i-mdi-magnify" placeholder="Search sensors" size="sm" class="grow" />
-                    <UPopover v-model:open="showFilters" :content="{ side: 'bottom', align: 'end' }">
+                    <UInput v-model="query" icon="i-mdi-magnify" :placeholder="`Search ${kind}`" size="sm" class="grow" />
+                    <USelect v-model="sortMode" :items="sortItems" size="xs" variant="ghost"
+                        class="sensors__sort" aria-label="Sort" />
+                    <UPopover v-if="kind === 'stations'" v-model:open="showFilters" :content="{ side: 'bottom', align: 'end' }">
                         <UButton
                             variant="outline"
                             color="neutral"
@@ -51,11 +60,14 @@
                 </div>
             </div>
 
-            <div v-if="filteredSensors.length === 0" class="text-center text-muted p-4">
-                No sensors match your filters.
+            <div v-if="kindCount === 0" class="text-center text-muted p-4 grid gap-2 justify-items-center">
+                <span>No {{ kind }} match{{ kind === 'stations' ? ' your filters' : '' }}.</span>
+                <UButton v-if="otherKindCount" size="xs" variant="outline" color="neutral" @click="searchOtherKind">
+                    {{ otherKindCount }} {{ otherKindCount === 1 ? otherKind.slice(0, -1) : otherKind }} match{{ otherKindCount === 1 ? 'es' : '' }}
+                </UButton>
             </div>
 
-            <div v-else class="sensors__list">
+            <div v-else-if="kind === 'stations'" class="sensors__list">
                 <div v-for="sensor in sortedSensors" :key="sensor.id" :ref="setSensorRef(sensor.id)"
                     role="button" tabindex="0" class="srow" :class="{ 'srow--on': sensor.id === selectedSensor?.id }"
                     @click="selectSensor(sensor.id)" @keydown.enter="selectSensor(sensor.id)"
@@ -96,39 +108,38 @@
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- C-PROOF gliders: a deployment moves, so a row shows its
-                     mission window and distance flown instead of a depth. -->
-                <template v-if="mainStore.gliders.length">
-                    <div class="sgroup oe-label">Gliders · {{ mainStore.gliders.length }}</div>
-                    <div v-for="g in mainStore.gliders" :key="g.id"
-                        role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
-                        @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
-                        @mouseenter="mainStore.hoveredGliderId = g.id" @mouseleave="mainStore.hoveredGliderId = null">
-                        <span class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
-                            :title="g.active ? 'Live: on mission now' : 'Recovered'" />
-                        <span class="srow__name">{{ g.id }}</span>
-                        <span class="srow__depth oe-num">{{ Math.round(g.distanceKm) }} km</span>
-                        <span class="srow__sub oe-num">
-                            <span>C-PROOF</span>
-                            <span class="srow__vars">{{ g.variables.map(v => variableShort(v)).join(' ') }} · glider</span>
-                            <span class="srow__age">{{ gliderAge(g.end) }}</span>
-                        </span>
-                        <div v-if="g.id === mainStore.selectedGliderId" class="srow__detail" @click.stop>
-                            <div class="srow__kv">
-                                <span>Mission</span><span class="oe-num">{{ gliderRange(g) }}</span>
-                                <span>Profiles</span><span class="oe-num">{{ g.profiles }}</span>
-                                <span>Platform</span><span>{{ g.platformType }}<template v-if="g.station"> · from {{ g.station }}</template></span>
-                                <span>Data</span><span>{{ g.variant === 'grid' ? 'Real-time' : 'Delayed mode' }}, unscreened</span>
-                                <span v-if="g.summary">Notes</span><span v-if="g.summary">{{ g.summary }}</span>
-                            </div>
-                            <div class="srow__acts">
-                                <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
-                                    :to="`https://cproof.uvic.ca/gliderdata/deployments/${g.glider}/${g.id}/`" target="_blank">C-PROOF page</UButton>
-                            </div>
+            <!-- C-PROOF gliders: a deployment moves, so a row shows its
+                 mission window and distance flown instead of a depth. -->
+            <div v-else class="sensors__list">
+                <div v-for="g in sortedGliders" :key="g.id" :ref="setSensorRef(`glider:${g.id}`)"
+                    role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
+                    @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
+                    @mouseenter="mainStore.hoveredGliderId = g.id" @mouseleave="mainStore.hoveredGliderId = null">
+                    <span class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
+                        :title="g.active ? 'Live: on mission now' : 'Recovered'" />
+                    <span class="srow__name">{{ g.id }}</span>
+                    <span class="srow__depth oe-num">{{ Math.round(g.distanceKm) }} km</span>
+                    <span class="srow__sub oe-num">
+                        <span>C-PROOF</span>
+                        <span class="srow__vars">{{ g.variables.map(v => variableShort(v)).join(' ') }} · glider</span>
+                        <span class="srow__age">{{ gliderAge(g.end) }}</span>
+                    </span>
+                    <div v-if="g.id === mainStore.selectedGliderId" class="srow__detail" @click.stop>
+                        <div class="srow__kv">
+                            <span>Mission</span><span class="oe-num">{{ gliderRange(g) }}</span>
+                            <span>Profiles</span><span class="oe-num">{{ g.profiles }}</span>
+                            <span>Platform</span><span>{{ g.platformType }}<template v-if="g.station"> · from {{ g.station }}</template></span>
+                            <span>Data</span><span>{{ g.variant === 'grid' ? 'Real-time' : 'Delayed mode' }}, unscreened</span>
+                            <span v-if="g.summary">Notes</span><span v-if="g.summary">{{ g.summary }}</span>
+                        </div>
+                        <div class="srow__acts">
+                            <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
+                                :to="`https://cproof.uvic.ca/gliderdata/deployments/${g.glider}/${g.id}/`" target="_blank">C-PROOF page</UButton>
                         </div>
                     </div>
-                </template>
+                </div>
             </div>
         </template>
     </div>
@@ -149,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { useMainStore, type GliderDeployment } from '@/stores/main';
+import { useMainStore, sensorMatches, type GliderDeployment } from '@/stores/main';
 import { storeToRefs } from 'pinia';
 import { ref, computed, watch, nextTick, type ComponentPublicInstance } from 'vue';
 import { sensorIsRealtime } from '~~/composables/useSensorStatus';
@@ -159,6 +170,7 @@ import { useVariableRegistry } from '~~/composables/useVariableRegistry';
 import { trackEvent } from '~~/composables/useAnalytics';
 import { sensorInstruments } from '~~/composables/useSensorTimeseries';
 import { useViewState } from '~~/composables/useViewState';
+import SegmentedControl from './ui/SegmentedControl.vue';
 
 const mainStore = useMainStore();
 // Labels and the "is this a variable we show?" test both come from
@@ -236,14 +248,18 @@ const sortItems = computed(() => [
     { label: 'A–Z', value: 'name' },
 ]);
 
-function distanceKm(sensor: Sensor): number | null {
+function kmFromClick(lat: number, lng: number): number | null {
     const p = mainStore.lastClickedMapPoint;
     if (!p) return null;
     const rad = Math.PI / 180;
-    const dLat = (sensor.latitude - p.lat) * rad;
-    const dLng = (sensor.longitude - p.lng) * rad;
-    const h = Math.sin(dLat / 2) ** 2 + Math.cos(p.lat * rad) * Math.cos(sensor.latitude * rad) * Math.sin(dLng / 2) ** 2;
+    const dLat = (lat - p.lat) * rad;
+    const dLng = (lng - p.lng) * rad;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(p.lat * rad) * Math.cos(lat * rad) * Math.sin(dLng / 2) ** 2;
     return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+function distanceKm(sensor: Sensor): number | null {
+    return kmFromClick(sensor.latitude, sensor.longitude);
 }
 
 const statusRank = (s: Sensor) => (statusOf(s) === 'live' ? 0 : statusOf(s) === 'historic' ? 1 : 2);
@@ -255,6 +271,75 @@ const sortedSensors = computed(() => {
     }
     return list.sort((a, b) => statusRank(a) - statusRank(b));
 });
+
+// Gliders have their own search, which narrows the list only (the map keeps
+// every track); the stations' search lives in the store because the markers
+// follow it. "Nearest" measures to the latest fix, where the map draws the triangle.
+const gliderQuery = ref('');
+function glidersMatching(query: string) {
+    const q = query.trim().toLowerCase();
+    if (!q) return mainStore.gliders;
+    return mainStore.gliders.filter(g =>
+        [g.id, g.glider, g.station, g.platformType, g.summary].some(f => f?.toLowerCase().includes(q)));
+}
+const filteredGliders = computed(() => glidersMatching(gliderQuery.value));
+
+function gliderKm(g: GliderDeployment): number | null {
+    const fix = g.track[g.track.length - 1];
+    return fix ? kmFromClick(fix[1], fix[0]) : null;
+}
+
+const sortedGliders = computed(() => {
+    const list = [...filteredGliders.value];
+    if (sortMode.value === 'name') return list.sort((a, b) => a.id.localeCompare(b.id));
+    if (sortMode.value === 'distance' && mainStore.lastClickedMapPoint) {
+        return list.sort((a, b) => (gliderKm(a) ?? Infinity) - (gliderKm(b) ?? Infinity));
+    }
+    return list.sort((a, b) => Number(b.active) - Number(a.active) || b.end.localeCompare(a.end));
+});
+
+///////////////////////////////////  INSTRUMENT TABS  ///////////////////////////////////
+
+// One tab per instrument kind; the map always shows every kind whose layer is
+// on, whichever tab is open. Selecting on the map switches to the matching tab.
+type Kind = 'stations' | 'gliders';
+const kind = ref<Kind>(mainStore.selectedGliderId ? 'gliders' : 'stations');
+const otherKind = computed<Kind>(() => (kind.value === 'stations' ? 'gliders' : 'stations'));
+const countOf = (k: Kind) => (k === 'stations' ? filteredSensors.value.length : filteredGliders.value.length);
+const kindCount = computed(() => countOf(kind.value));
+
+const query = computed({
+    get: () => (kind.value === 'stations' ? searchQuery.value : gliderQuery.value),
+    set: (v: string) => { if (kind.value === 'stations') searchQuery.value = v; else gliderQuery.value = v; },
+});
+// When a search empties this tab, say how many of the other kind it would find.
+const otherKindCount = computed(() => {
+    if (!query.value.trim()) return 0;
+    return otherKind.value === 'gliders'
+        ? glidersMatching(query.value).length
+        : mainStore.sensors.filter(s => sensorMatches(s, query.value, organizationFilter.value, variableFilter.value)).length;
+});
+function searchOtherKind() {
+    const q = query.value;
+    query.value = '';
+    kind.value = otherKind.value;
+    query.value = q;
+}
+
+const layerOn = (k: Kind) => (k === 'stations' ? mainStore.showSensorLayer : mainStore.showGliderLayer);
+const kindLayerOn = computed(() => layerOn(kind.value));
+function toggleKindLayer() {
+    if (kind.value === 'stations') mainStore.setShowSensorLayer(!mainStore.showSensorLayer);
+    else mainStore.setShowGliderLayer(!mainStore.showGliderLayer);
+}
+
+// A tab whose layer is off carries an eye-off, so the state shows from either tab.
+const kindItems = computed(() => (['stations', 'gliders'] as Kind[]).map(k => ({
+    value: k,
+    label: `${k === 'stations' ? 'Stations' : 'Gliders'} · ${countOf(k)}`,
+    icon: layerOn(k) ? undefined : 'i-mdi-eye-off-outline',
+    title: layerOn(k) ? undefined : `${k === 'stations' ? 'Stations' : 'Gliders'} (hidden on the map)`,
+})));
 
 /** live: reading within REALTIME_THRESHOLD_MS; historic: active, older data only; inactive. */
 function statusOf(sensor: Sensor): 'live' | 'historic' | 'inactive' {
@@ -333,14 +418,24 @@ function setSensorRef(id: string) {
     };
 }
 
-watch(() => selectedSensor.value?.id, async (id: string | undefined) => {
-    if (!id) return;
+async function scrollToRow(key: string) {
     await nextTick();
-    const el = sensorRefs.get(id);
+    const el = sensorRefs.get(key);
     const target = (el as any)?.$el ?? el;
     if (target instanceof HTMLElement) {
         target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+}
+
+watch(() => selectedSensor.value?.id, (id: string | undefined) => {
+    if (!id) return;
+    kind.value = 'stations';
+    scrollToRow(id);
+});
+watch(() => mainStore.selectedGliderId, (id) => {
+    if (!id) return;
+    kind.value = 'gliders';
+    scrollToRow(`glider:${id}`);
 });
 
 ///////////////////////////////// METHODS  ///////////////////////////////////
@@ -387,7 +482,7 @@ function openInfoDialog(sensor: typeof mainStore.sensors[number]) {
 .sensors__sort {
     width: auto;
     min-width: 0;
-    margin-right: -8px;
+    flex-shrink: 0;
     font-size: 11px;
 }
 
@@ -396,11 +491,6 @@ function openInfoDialog(sensor: typeof mainStore.sensors[number]) {
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
-}
-
-.sgroup {
-    padding: 10px 14px 6px;
-    border-bottom: 1px solid var(--ui-border-muted);
 }
 
 .srow {
