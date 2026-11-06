@@ -1,9 +1,9 @@
 import type { FeatureCollection } from 'geojson';
 import { chart } from '@/config/palette';
-import type { GliderDeployment } from '@/stores/main';
+import type { GliderClip, GliderDeployment } from '@/stores/main';
 
 // C-PROOF glider deployments: a track line per deployment plus a marker at its
-// latest fix. Sensor blue like every other observation; a triangle (fixed
+// latest fix, both cut to the observation period when one is set. Sensor blue like every other observation; a triangle (fixed
 // sensors are squares, profilers diamonds) with the same green live dot.
 const INK = '#d4d9de';
 const GROUND = '#13161a';
@@ -54,28 +54,48 @@ async function loadImage(map: any, id: string, svg: string, size: number): Promi
     map.addImage(id, canvas.getContext('2d')!.getImageData(0, 0, size, size), { pixelRatio: 2 });
 }
 
-function buildGeoJSON(gliders: GliderDeployment[]): { tracks: FeatureCollection, heads: FeatureCollection } {
+/**
+ * Tracks and heads; with `clips` (the observation period is on), each track
+ * is only its matching stretches and its head sits at the last of them.
+ */
+function buildGeoJSON(gliders: GliderDeployment[], clips: Record<string, GliderClip> | null): { tracks: FeatureCollection, heads: FeatureCollection } {
+    const lines = gliders
+        .map(g => ({ g, segments: clips ? clips[g.id]?.segments ?? [] : [g.track.map(p => [p[0], p[1]] as [number, number])] }))
+        .filter(({ segments }) => segments.some(seg => seg.length > 1));
     return {
         tracks: {
             type: 'FeatureCollection',
-            features: gliders.filter(g => g.track.length > 1).map(g => ({
+            features: lines.map(({ g, segments }) => ({
                 type: 'Feature',
                 properties: { id: g.id, active: g.active },
-                geometry: { type: 'LineString', coordinates: g.track.map(p => [p[0], p[1]]) },
+                geometry: { type: 'MultiLineString', coordinates: segments },
             })),
         },
         heads: {
             type: 'FeatureCollection',
-            features: gliders.filter(g => g.track.length).map(g => {
-                const last = g.track[g.track.length - 1]!;
+            features: lines.map(({ g, segments }) => {
+                const seg = segments[segments.length - 1]!;
+                const last = seg[seg.length - 1]!;
                 return {
                     type: 'Feature',
-                    properties: { id: g.id, active: g.active },
+                    // A head clipped short of the latest fix isn't "on mission now".
+                    properties: { id: g.id, active: g.active && (!clips || sameFix(last, g.track[g.track.length - 1]!)) },
                     geometry: { type: 'Point', coordinates: [last[0], last[1]] },
                 };
             }),
         },
     };
+}
+
+function sameFix(a: number[], b: number[]): boolean {
+    return Math.abs(a[0]! - b[0]!) < 1e-6 && Math.abs(a[1]! - b[1]!) < 1e-6;
+}
+
+/** Replace the track and head geometry, e.g. when the observation period changes. */
+export function setGliderTracks(map: any, gliders: GliderDeployment[], clips: Record<string, GliderClip> | null) {
+    const { tracks, heads } = buildGeoJSON(gliders, clips);
+    map.getSource(SOURCE_TRACKS)?.setData(tracks);
+    map.getSource(SOURCE_HEADS)?.setData(heads);
 }
 
 /**
@@ -85,13 +105,14 @@ function buildGeoJSON(gliders: GliderDeployment[]): { tracks: FeatureCollection,
 export async function addGliderLayer(
     map: any,
     gliders: GliderDeployment[],
+    clips: Record<string, GliderClip> | null,
     onClick: (id: string) => void,
 ): Promise<() => void> {
     await Promise.all([
         loadImage(map, IMG.live, makeTriangleSvg(true), 32),
         loadImage(map, IMG.historic, makeTriangleSvg(false), 32),
     ]);
-    const { tracks, heads } = buildGeoJSON(gliders);
+    const { tracks, heads } = buildGeoJSON(gliders, clips);
 
     if (map.getSource(SOURCE_TRACKS)) {
         map.getSource(SOURCE_TRACKS).setData(tracks);

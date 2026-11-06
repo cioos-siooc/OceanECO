@@ -181,6 +181,10 @@
           <div v-show="activeTab === 'crossSection'" style="height: 100%">
             <CrossSectionPanel :active="activeTab === 'crossSection'" />
           </div>
+          <!-- Area tab: every visible observation inside a drawn circle. -->
+          <div v-show="activeTab === 'area'" style="height: 100%">
+            <AreaPanel :active="activeTab === 'area'" />
+          </div>
         </div>
         <!-- Model, depth and field controls with every variable at the point;
              permanent and shared by both panes. -->
@@ -217,10 +221,11 @@ import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
 import { haversineM } from '@/utils/sensorMerge';
 import { addCastLayer, setCastLayerVisibility, setSelectedCast, CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
-import { addGliderLayer, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
+import { addGliderLayer, setGliderTracks, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
 import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
 import { fetchSeafloorGrid } from '~~/composables/useSeafloorGrid';
-import { fetchGliderSection } from '~~/composables/useGliderSectionFetch';
+import { fetchGliderSection, sectionInPeriod } from '~~/composables/useGliderSectionFetch';
+import { isoDay, matchesTime } from '@/utils/obsFilter';
 import { useFieldColorRamp } from '~~/composables/useFieldColorRamp';
 import { addBuoyLayer, setBuoyLayerVisibility, setSelectedBuoy, setHoveredBuoy, SOURCE_ID, STATIONS_LAYER_ID, type MultiSensorCandidate } from '~~/composables/useBuoyLayer';
 import getSensorTimeseries from '~~/composables/useSensorTimeseries';
@@ -228,12 +233,14 @@ import AnalysisWorkspace from '../components/AnalysisWorkspace.vue'
 import ExplorePanel from '../components/ExplorePanel.vue'
 import ComparisonWorkspace from '../components/ComparisonWorkspace.vue'
 import CrossSectionPanel from '../components/crossSection/CrossSectionPanel.vue'
+import AreaPanel from '../components/area/AreaPanel.vue'
+import { useObsAreaLayer } from '~~/composables/useObsAreaLayer'
 import PointSnapshot from '../components/snapshot/PointSnapshot.vue'
 import SegmentedControl from '../components/ui/SegmentedControl.vue'
 
 ///////////////////////////////////  SETUP  ///////////////////////////////////
 
-import { useMainStore, type GliderDeployment, type Sensor } from '../stores/main'
+import { useMainStore, type BottomTab, type GliderDeployment, type Sensor, type ShipCast } from '../stores/main'
 import { trackEvent } from '~~/composables/useAnalytics'
 import { useRasterProbe } from '~~/composables/useRasterProbe'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
@@ -273,7 +280,7 @@ watch(() => mainStore.exploreView, (view) => {
 
 const activeTab = computed({
     get: () => mainStore.activeBottomTab,
-    set: (v: 'explore' | 'analysis' | 'comparison' | 'crossSection') => mainStore.setActiveBottomTab(v),
+    set: (v: BottomTab) => mainStore.setActiveBottomTab(v),
 });
 // Navigation between panes and workspaces lives in the header (AppNav.vue);
 // Explore's own sub-views are picked from ExplorePanel's toolbar.
@@ -570,6 +577,15 @@ onMounted(async () => {
         map?.on('draw.create', onCrossSectionDrawChange);
         map?.on('draw.update', onCrossSectionDrawChange);
         map?.on('draw.delete', () => mainStore.setCrossSectionLine(null));
+
+        if (map) {
+            areaLayer = useObsAreaLayer(map, (c) => mainStore.setObsArea({
+                ...c,
+                depthMin: mainStore.obsArea?.depthMin ?? AREA_DEFAULT_DEPTH[0],
+                depthMax: mainStore.obsArea?.depthMax ?? AREA_DEFAULT_DEPTH[1],
+            }));
+            syncAreaLayer();
+        }
     });
 
 
@@ -1194,7 +1210,7 @@ function clickSensor(sensor_id: string, depth: number) {
 async function addGliders() {
     const r = await axios.get(`${apiBaseUrl}/gliders`);
     mainStore.setGliders(r.data);
-    const detach = await addGliderLayer(map, r.data, (id) => {
+    const detach = await addGliderLayer(map, mainStore.filteredGliders, mainStore.gliderClips, (id) => {
         mainStore.setSelectedSensor(null);
         mainStore.selectGlider(id);
     });
@@ -1206,8 +1222,15 @@ async function addGliders() {
     updateGliderSeafloor();
 }
 
-// DFO IOS ship casts: the period's points (mainStore.castPeriod, a year range
-// picked in the sensor list), re-fetched whenever the period changes.
+// The observation period cuts every glider track to its matching stretches.
+watch(() => mainStore.gliderClips, (clips) => {
+    if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.filteredGliders, clips);
+    updateGliderCurtain();
+});
+
+// DFO IOS ship casts matching the observation period (mainStore.obsFilter),
+// re-fetched whenever it changes. Day/night needs the sun at each cast, so it
+// is applied here rather than by the API.
 async function addCasts() {
     const r = await axios.get(`${apiBaseUrl}/casts/years`);
     mainStore.setCastYears(r.data);
@@ -1217,21 +1240,38 @@ async function addCasts() {
 let _castsRequest = 0;
 let _castsDetach: (() => void) | null = null;
 async function loadCasts() {
-    const period = mainStore.castPeriod;
-    if (!map || !period) return;
+    if (!map) return;
+    const p = mainStore.obsResolved;
     const req = ++_castsRequest;
     const r = await axios.get(`${apiBaseUrl}/casts`, {
-        params: { from: `${period[0]}-01-01`, to: `${period[1] + 1}-01-01` },
+        params: {
+            from: p.from != null ? isoDay(p.from) : undefined,
+            to: p.to != null ? isoDay(p.to) : undefined,
+            months: p.months?.join(','),
+            doy: p.doy?.center,
+            half: p.doy?.half,
+        },
     });
     if (req !== _castsRequest) return; // a newer period was picked meanwhile
-    mainStore.setCasts(r.data);
-    const detach = addCastLayer(map, r.data.casts, (id) => mainStore.selectCast(id));
+    const casts = p.diel === 'all' ? r.data.casts
+        : r.data.casts.filter((c: ShipCast) => matchesTime(p, Date.parse(c.time), c.lat, c.lon));
+    mainStore.setCasts({ ...r.data, casts, total: r.data.total - (r.data.casts.length - casts.length) });
+    const detach = addCastLayer(map, casts, (id) => mainStore.selectCast(id));
     if (detach) _castsDetach = detach;
     setSelectedCast(map, mainStore.selectedCastId);
     setCastLayerVisibility(map, mainStore.showCastLayer);
 }
 
-watch(() => mainStore.castPeriod, () => loadCasts().catch((e) => console.warn('loadCasts failed:', e)));
+// Keyed on what the API is asked, so a map-date step only refetches when the
+// period follows it; debounced for playback and for dragging the year brush.
+let _castsTimer: ReturnType<typeof setTimeout> | null = null;
+watch(() => {
+    const p = mainStore.obsResolved;
+    return JSON.stringify([p.from, p.to, p.months, p.doy, p.diel]);
+}, () => {
+    if (_castsTimer) clearTimeout(_castsTimer);
+    _castsTimer = setTimeout(() => loadCasts().catch((e) => console.warn('loadCasts failed:', e)), 300);
+});
 watch(() => mainStore.selectedCastId, (id) => setSelectedCast(map, id));
 watch(() => mainStore.showCastLayer, (visible: boolean) => setCastLayerVisibility(map, visible));
 
@@ -1254,7 +1294,7 @@ async function updateGliderCurtain() {
         return;
     }
     try {
-        const s = await fetchGliderSection(g.id, v, range);
+        const s = sectionInPeriod(await fetchGliderSection(g.id, v, range), mainStore.obsResolved);
         if (seq !== curtainSeq) return;
         const deepest = s.values.findLastIndex(row => row.some(x => x != null));
         if (deepest >= 0) curtainBottomM = s.depths[deepest]!;
@@ -1369,6 +1409,10 @@ watch(() => mainStore.showGliderLayer, (visible: boolean) => {
 });
 
 async function getSensors() {
+    // Coverage only matters once a period is picked; it lands on its own.
+    axios.get(`${apiBaseUrl}/sensors/coverage`)
+        .then((r) => mainStore.setSensorCoverage(r.data))
+        .catch((e) => console.warn('sensor coverage failed:', e));
     try {
         const r = await axios.get(`${apiBaseUrl}/sensors`);
         const data = r.data;
@@ -1567,7 +1611,7 @@ async function updatePngOverlay(sourceId = 'png-image', layerId = 'png-image-lay
         // While drawing a cross-section line, clicks add vertices via
         // crossSectionDraw (see onCrossSectionDrawChange) — they aren't a
         // point query, and must not clear the sensor selection mid-draw.
-        if (mainStore.activeBottomTab === 'crossSection') return;
+        if (mainStore.activeBottomTab === 'crossSection' || mainStore.activeBottomTab === 'area') return;
 
         const { lng, lat } = evt.lngLat;
 
@@ -2042,7 +2086,7 @@ watch(activeTab, (tab) => {
 
     // The point-click marker and the cross-section line/vertices are mutually
     // exclusive map decorations — only one mode's input should be visible at a time.
-    if (tab === 'crossSection') {
+    if (tab === 'crossSection' || tab === 'area') {
         try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
     } else if (lastClicked.value) {
         trigger_mapClick(lastClicked.value.lat, lastClicked.value.lng);
@@ -2062,6 +2106,26 @@ watch(() => mainStore.crossSectionRedrawToken, () => {
     if (!crossSectionDraw) return;
     crossSectionDraw.deleteAll();
     crossSectionDraw.changeMode('draw_line_string');
+});
+
+// --- AREA TAB CIRCLE ---
+// Shown only on the Area tab; drawing is armed on entering it with no circle
+// yet, and by AreaPanel's "Redraw" (obsAreaDrawToken).
+let areaLayer: ReturnType<typeof useObsAreaLayer> | null = null;
+const AREA_DEFAULT_DEPTH: [number, number] = [0, 20];
+
+function syncAreaLayer() {
+    if (!areaLayer) return;
+    const onTab = activeTab.value === 'area';
+    // Only arms or disarms on its own when there's no circle or no tab: a
+    // depth change mid-redraw must not cancel the redraw.
+    if (!onTab) areaLayer.arm(false);
+    else if (!mainStore.obsArea) areaLayer.arm(true);
+    areaLayer.render(onTab ? mainStore.obsArea : null);
+}
+watch([activeTab, () => mainStore.obsArea], syncAreaLayer);
+watch(() => mainStore.obsAreaDrawToken, () => {
+    if (activeTab.value === 'area') areaLayer?.arm(true);
 });
 </script>
 

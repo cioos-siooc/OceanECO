@@ -1,5 +1,5 @@
 <template>
-  <!-- Top-level views. Explore and Cross-Section are footer panes beside the
+  <!-- Top-level views. Explore, Cross-Section and Area are footer panes beside the
        map; Analysis and Comparison open fullscreen workspaces. All four write
        the same `activeBottomTab` the footer and workspaces read. -->
   <nav class="app-nav" aria-label="Views">
@@ -55,6 +55,7 @@ const hasSensor = computed(() => !!mainStore.selectedSensor?.id)
 const tabs = computed(() => [
   { value: 'explore' as const, label: 'Explore', disabled: false, title: 'The clicked point over time' },
   { value: 'crossSection' as const, label: 'Cross-section', disabled: false, title: 'Depth along a line you draw' },
+  { value: 'area' as const, label: 'Area', disabled: false, title: 'Every visible observation inside a circle you draw' },
 ])
 
 const analysisItems = computed<DropdownMenuItem[]>(() => [

@@ -35,6 +35,8 @@ export const chart = {
     sensor: '#5fb3d6',
     clim: '#7d868f',
     night: 'rgba(255,255,255,0.025)',
+    // Laid over a chart's stretches outside the observation period, dimming the data there.
+    outsidePeriod: 'rgba(19,22,26,0.62)',
     // One per instrument when a sensor's instruments are compared; the first
     // matches the single merged sensor line.
     instruments: ['#5fb3d6', '#9ad08a', '#c9a0dc', '#e07a7a'],

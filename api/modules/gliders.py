@@ -30,6 +30,9 @@ MAX_ROWS = 256
 # Track simplification tolerance (degrees, ~200 m): far below what the map
 # shows at the zooms a whole deployment fits in.
 TRACK_TOLERANCE_DEG = 0.002
+# Longest step between kept track vertices that isn't a gap in the data; the
+# frontend's obsFilter.ts TRACK_GAP_S must match.
+TRACK_MAX_STEP_S = 12 * 3600
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -44,11 +47,18 @@ def _iso(dt) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _simplify(points: list[tuple[float, float]], tol: float) -> list[tuple[float, float]]:
-    """Ramer–Douglas–Peucker on (lon, lat), iterative."""
+def _simplify(points: list[tuple], tol: float, max_gap_s: float | None = None) -> list[tuple]:
+    """Ramer–Douglas–Peucker on each point's leading (lon, lat), iterative;
+    anything after them (a time) rides along with its vertex.
+
+    With `max_gap_s`, points carry a time third and extra vertices are kept so
+    no two consecutive ones are more than `max_gap_s` apart unless the data
+    itself is: a longer step between kept vertices then always means a gap in
+    the data, which the map won't draw a clipped track across.
+    """
     if len(points) < 3:
         return points
-    xy = np.asarray(points)
+    xy = np.asarray([p[:2] for p in points], dtype=float)
     keep = np.zeros(len(xy), dtype=bool)
     keep[[0, -1]] = True
     stack = [(0, len(xy) - 1)]
@@ -65,6 +75,14 @@ def _simplify(points: list[tuple[float, float]], tol: float) -> list[tuple[float
         if d[i] > tol:
             keep[a + 1 + i] = True
             stack += [(a, a + 1 + i), (a + 1 + i, b)]
+    if max_gap_s is not None:
+        last = 0
+        for i in range(1, len(points)):
+            if keep[i]:
+                last = i
+            elif points[i + 1][2] - points[last][2] > max_gap_s:
+                keep[i] = True
+                last = i
     return [points[i] for i in np.flatnonzero(keep)]
 
 
@@ -84,13 +102,13 @@ def list_gliders() -> list[dict]:
     # One fix per profile; any variable carries it, so take the cheapest.
     tracks: dict[str, list] = {}
     variables: dict[str, list[str]] = {}
-    for dep, lat, lon in client.query("""
-        SELECT deployment_id, any(latitude), any(longitude)
+    for dep, lat, lon, t in client.query("""
+        SELECT deployment_id, any(latitude), any(longitude), toUnixTimestamp(any(time))
         FROM glider_profiles
         GROUP BY deployment_id, profile
         ORDER BY deployment_id, profile
     """).result_rows:
-        tracks.setdefault(dep, []).append((lon, lat))
+        tracks.setdefault(dep, []).append((lon, lat, int(t)))
     for dep, var in client.query(
         "SELECT DISTINCT deployment_id, variable FROM glider_profiles"
     ).result_rows:
@@ -116,8 +134,10 @@ def list_gliders() -> list[dict]:
             "fileUrl": url,
             "variant": variant,
             "active": bool(active),
-            # [lon, lat], simplified; the section carries the per-profile fixes.
-            "track": [[round(lon, 5), round(lat, 5)] for lon, lat in _simplify(track, TRACK_TOLERANCE_DEG)],
+            # [lon, lat, unix seconds], simplified; the section carries the
+            # per-profile fixes. The time lets the map clip a track to the
+            # observation period.
+            "track": [[round(lon, 5), round(lat, 5), t] for lon, lat, t in _simplify(track, TRACK_TOLERANCE_DEG, TRACK_MAX_STEP_S)],
         })
     return out
 

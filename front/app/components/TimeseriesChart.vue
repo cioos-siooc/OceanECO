@@ -39,11 +39,16 @@ const MAP_MARK = {
     lineStyle: { color: chartPalette.model, width: 1, type: 'solid', opacity: 0.7 },
     label: { show: true, position: 'insideEndTop', formatter: 'Map', color: chartPalette.model, fontSize: 10.5, fontFamily: chartPalette.fontSans },
 };
+// The observation period's out-of-period shading; past this many bands (day/night
+// over a long window) it would only be noise.
+const OUTSIDE_PERIOD_FILL = chartPalette.outsidePeriod;
+const MAX_PERIOD_BANDS = 400;
 import timeseriesChartHelpImg from '../../public/timeseriesChartHelp.png';
 
 import { useMainStore } from '../stores/main';
 import { useVariableRegistry } from '~~/composables/useVariableRegistry';
 import { csvMeta, csvTimestamp, useCsvExport, type CsvDataset } from '~~/composables/useCsvExport';
+import { describeObsFilter, matchesTime, matchingIntervals } from '@/utils/obsFilter';
 const mainStore = useMainStore();
 const { displayUnit, variableDecimals, formatDisplayValue } = useVariableRegistry();
 
@@ -622,6 +627,30 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
     }
 
     option.series = seriesArr;
+    // The observation period: the stretches it leaves out are greyed over,
+    // as the sensor's points there fall outside it (the model never is).
+    const period = mainStore.obsResolved;
+    if (period.active && (hasInstruments || sensorData?.time?.length)) {
+        const t0 = startLocal.valueOf(), t1 = endLocal.valueOf();
+        const outside: [number, number][] = [];
+        let cursor = t0;
+        for (const [a, b] of matchingIntervals(period, t0, t1, lat, lng)) {
+            if (a > cursor) outside.push([cursor, a]);
+            cursor = b;
+        }
+        if (cursor < t1) outside.push([cursor, t1]);
+        if (outside.length && outside.length <= MAX_PERIOD_BANDS) {
+            seriesArr.push({
+                name: '_obs_period', type: 'line', data: [], silent: true, z: 8,
+                markArea: {
+                    silent: true,
+                    itemStyle: { color: OUTSIDE_PERIOD_FILL },
+                    data: outside.map(([a, b]) => [{ xAxis: moment.utc(a).tz(tz).format() }, { xAxis: moment.utc(b).tz(tz).format() }]),
+                },
+            });
+        }
+    }
+
     option.legend.data = [...new Set(seriesArr.filter((s: any) => s.name && !s.name.startsWith('_')).map((s: any) => s.name as string))];
 
     chart.setOption(option, true);
@@ -656,6 +685,12 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
         _statsLegendHandler = null;
     }
 }
+
+// A new observation period re-shades the chart from what's already plotted.
+watch(() => JSON.stringify(mainStore.obsResolved), () => {
+    const p = lastPlot.value;
+    if (p) plot(p.model, p.climate, p.sensor, p.instruments);
+});
 
 // Update only the vertical "Map" marker when selected dt changes (no full re-plot)
 watch(() => mainStore.selected_variable.dt, (newDt) => {
@@ -740,10 +775,16 @@ if (csv) csv.register((): CsvDataset[] => {
         if (!r) { r = { time: iso }; byTime.set(iso, r); }
         return r;
     };
-    const put = (times: (string | number)[], values: (number | null)[] | undefined, key: string) => {
+    // Observations outside the observation period stay out of the file, as
+    // they are greyed out on the chart; the model is never filtered.
+    const period = mainStore.obsResolved;
+    const pt = mainStore.lastClickedMapPoint;
+    const put = (times: (string | number)[], values: (number | null)[] | undefined, key: string, observed = false) => {
         times.forEach((t, i) => {
             const iso = csvTimestamp(t);
-            if (iso) row(iso)[key] = values?.[i] ?? null;
+            if (!iso) return;
+            if (observed && period.active && !matchesTime(period, moment.utc(t).valueOf(), pt?.lat, pt?.lng)) return;
+            row(iso)[key] = values?.[i] ?? null;
         });
     };
 
@@ -753,14 +794,14 @@ if (csv) csv.register((): CsvDataset[] => {
         columns.push({ header: 'model', unit: u, accessorKey: 'model' });
     }
     if (withSensor) {
-        put(p.sensor!.time!, p.sensor!.value, 'sensor');
+        put(p.sensor!.time!, p.sensor!.value, 'sensor', true);
         columns.push({ header: 'sensor', unit: u, accessorKey: 'sensor' });
     }
     // One column per compared instrument, named by its ONC location and device
     // category; the plotted differences are derivable, so they aren't exported.
     instruments.forEach((inst, k) => {
         const key = `instrument${k}`;
-        put(inst.time, inst.value, key);
+        put(inst.time, inst.value, key, true);
         columns.push({ header: `sensor_${inst.id.replace('/', '_')}`, unit: u, accessorKey: key });
     });
     if (withClimate) {
@@ -799,6 +840,9 @@ if (csv) csv.register((): CsvDataset[] => {
         omitDatasetLine: true,
         meta: csvMeta(csv.context.value, [
             ...((withSensor || instruments.length) && sensorName ? [['sensor', sensorName] as [string, unknown]] : []),
+            ...((withSensor || instruments.length) && period.active
+                ? [['observation_period', `${describeObsFilter(mainStore.obsFilter)}; sensor values outside it are left out`] as [string, unknown]]
+                : []),
             ...(withClimate ? [
                 ['note', 'climatology is one row per calendar day at noon UTC, so its rows sit on their own timestamps rather than the model/sensor ones'] as [string, unknown],
             ] : []),

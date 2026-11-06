@@ -9,6 +9,7 @@ from extractTimeseries import OutsideDomainError
 class FakeResult:
     def __init__(self, rows):
         self.result_rows = rows
+        self.first_row = rows[0] if rows else None
 
 
 class FakeClient:
@@ -21,6 +22,8 @@ class FakeClient:
             return FakeResult(self.values)
         if "where cast_id =" in q:
             return FakeResult(self.meta)
+        if "select count()" in q:
+            return FakeResult([(len(self.listing),)])
         return FakeResult(self.listing)
 
     def close(self):
@@ -84,7 +87,7 @@ def test_listing_truncates_and_labels_observed_variables(monkeypatch):
     monkeypatch.setattr(ship_casts, "MAX_CASTS", 2)
     monkeypatch.setattr(ship_casts, "get_ch_client", lambda: FakeClient(listing=[row] * 3))
     out = ship_casts.list_casts("2024-01-01", "2025-01-01")
-    assert out["truncated"] and len(out["casts"]) == 2
+    assert out["truncated"] and len(out["casts"]) == 2 and out["total"] == 3
     assert out["variables"]["nitrate"]["modelled"] is False
     assert out["variables"]["temperature"]["modelled"] is True
 
@@ -102,3 +105,20 @@ def test_a_failing_model_read_leaves_the_cast(monkeypatch):
     monkeypatch.setattr(ship_casts, "extract_profile", fake_profile)
     out = ship_casts.cast_profile("2024-002-0001", "SalishSeaCast", "temperature")
     assert out["profiles"] and out["model"] is None and out["modelError"]["code"] == "model_unavailable"
+
+
+def test_filter_sql_combines_range_months_and_day_of_year():
+    where, params = ship_casts.cast_filter_sql("1990-01-01", None, [12, 1, 2, 1], 225, 15)
+    assert "time >= {f:DateTime64(0)}" in where and "time <" not in where
+    assert params["m"] == [1, 2, 12]
+    assert params["c"] == 225 and params["h"] == 15
+
+
+def test_filter_sql_without_a_filter_matches_everything():
+    assert ship_casts.cast_filter_sql() == ("1", {})
+
+
+@pytest.mark.parametrize("kw", [{"months": [13]}, {"doy": 400, "half_days": 5}, {"doy": 10}])
+def test_filter_sql_rejects_bad_values(kw):
+    with pytest.raises(ValueError):
+        ship_casts.cast_filter_sql(**kw)

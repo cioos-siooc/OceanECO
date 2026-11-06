@@ -1,6 +1,11 @@
 <template>
     <aside v-show="isOpen" class="p-2 absolute right-0 top-0 h-full w-[300px] overflow-y-auto bg-muted border-l border-default"
         style="z-index:999;">
+        <!-- A selected ship cast takes the drawer over: it is a vertical profile
+             too, and the model's own one is overlaid on it there. -->
+        <CastProfile v-if="castMode" class="h-full" @close="mainStore.selectCast(null)" />
+
+        <div v-show="!castMode" class="h-full flex flex-col">
         <div class="flex flex-wrap m-0 p-0 items-center" style="height: 38px;">
             <div class="drawer-header grow" style="min-width:0;">
                 <div class="title-text truncate">{{ title }}</div>
@@ -17,6 +22,7 @@
                 <span v-else>{{ statusMessage }}</span>
             </div>
         </div>
+        </div>
     </aside>
 </template>
 
@@ -32,6 +38,7 @@ import { useVariableRegistry } from '~~/composables/useVariableRegistry';
 import { utc2pst } from '~~/composables/useUTC2PST';
 import { useMainStore } from '../stores/main';
 import { asOutsideDomainError, type OutsideDomainError } from '~~/composables/useDepthProfileFetch';
+import CastProfile from './cast/CastProfile.vue';
 
 type SelectedPoint = {
     lat: number;
@@ -75,6 +82,7 @@ const isOpen = computed({
 });
 
 const mainStore = useMainStore();
+const castMode = computed(() => !!mainStore.selectedCastId);
 
 const { variableLabel, displayUnit, toDisplayValue, formatDisplayValue } = useVariableRegistry();
 
@@ -178,8 +186,8 @@ onBeforeUnmount(() => {
     cancelRequest();
 });
 
-watch([requestParams, isOpen], ([params, open]) => {
-    if (open && params) {
+watch([requestParams, isOpen, castMode], ([params, open, cast]) => {
+    if (open && params && !cast) {
         fetchProfile(params);
     } else {
         clearChart();

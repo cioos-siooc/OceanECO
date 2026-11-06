@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Tuple
 from functools import partial
 from contextlib import asynccontextmanager
@@ -26,6 +26,8 @@ from modules.extract_cross_section import extract_cross_section
 from modules.point_snapshot import extract_point_snapshot
 from modules.gliders import list_gliders, extract_glider_section
 from modules.ship_casts import cast_years, list_casts, cast_profile
+from modules.sensor_coverage import sensor_coverage
+from modules.obs_area import obs_area
 from modules.extract_image import generate_image
 from modules.ocean_analysis import lookup_grid_cells_for_polygon, lookup_nearest_grid_cell, query_region_timeseries
 from modules.sync_hourly import import_native_file, import_daily_native_file, SyncConflict, SyncError, SYNC_API_TOKEN
@@ -228,6 +230,15 @@ async def get_sensors():
         logger.exception("get_sensors failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
+@app.get("/sensors/coverage")
+async def get_sensor_coverage(request: Request):
+    """Each sensor's months with data (YYYYMM), for the observation-period filter."""
+    try:
+        return _gzip_json(request, await run_in_threadpool(sensor_coverage))
+    except Exception as exc:
+        logger.exception("get_sensor_coverage failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
 #######################################
 
 def _gzip_json(request: Request, payload) -> Response:
@@ -282,10 +293,16 @@ async def get_cast_years():
 
 
 @app.get("/casts")
-async def get_casts(request: Request, from_: str = Query(..., alias="from"), to: str = Query(...)):
-    """IOS ship casts with `from <= time < to` (ISO dates), plus labels for their variables."""
+async def get_casts(request: Request, from_: Optional[str] = Query(None, alias="from"), to: Optional[str] = None,
+                    months: Optional[str] = None, doy: Optional[int] = None, half: Optional[int] = None):
+    """IOS ship casts matching the observation period, latest first, plus labels for their variables.
+
+    `from <= time < to` (ISO dates, each optional), `months` a comma list of
+    calendar months (1-12), `doy` ± `half` a day-of-year window in every year.
+    """
     try:
-        return _gzip_json(request, await run_in_threadpool(list_casts, from_, to))
+        month_list = [int(m) for m in months.split(",") if m.strip()] if months else None
+        return _gzip_json(request, await run_in_threadpool(list_casts, from_, to, month_list, doy, half))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -314,6 +331,51 @@ async def get_cast_profile(request: castProfileRequest, http: Request):
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         logger.exception("get_cast_profile failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class obsAreaPeriod(BaseModel):
+    # The observation period, resolved (obsFilter.ts's resolveObsFilter): ISO days, `to` exclusive.
+    from_: Optional[str] = Field(None, alias="from")
+    to: Optional[str] = None
+    months: Optional[list[int]] = None
+    doy: Optional[int] = None
+    half: Optional[int] = None
+
+
+class obsAreaRequest(BaseModel):
+    variable: str
+    lat: float
+    lon: float
+    radiusKm: float
+    depthMin: float = 0
+    depthMax: float = 12000
+    period: obsAreaPeriod = obsAreaPeriod()
+    diel: str = "all"
+    # Only what the map shows: visible sensors' (or merges' member) ids,
+    # visible glider deployments, and whether the cast layer is on.
+    sensorIds: list[str] = []
+    gliderIds: list[str] = []
+    casts: bool = False
+    bin: str = "auto"
+
+
+@app.post("/obsArea")
+async def get_obs_area(request: obsAreaRequest, http: Request):
+    """Every visible observation of one variable in a circle, depth range and observation period."""
+    period = {"from": request.period.from_, "to": request.period.to, "months": request.period.months,
+              "doy": request.period.doy, "half": request.period.half}
+    try:
+        result = await asyncio.wait_for(
+            run_in_threadpool(obs_area, request.variable, request.lat, request.lon, request.radiusKm,
+                              request.depthMin, request.depthMax, period, request.diel,
+                              request.sensorIds, request.gliderIds, request.casts, request.bin),
+            timeout=THREADPOOL_TIMEOUT,
+        )
+        return _gzip_json(http, result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("get_obs_area failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 #######################################

@@ -1,6 +1,7 @@
 import moment from 'moment'
-import { useMainStore } from '@/stores/main'
+import { useMainStore, type BottomTab } from '@/stores/main'
 import type { BinMode } from './useTimeDepthWindow'
+import { isObsFilterActive, parseObsFilter, type ObsFilter } from '@/utils/obsFilter'
 
 /**
  * "Share this view" — the whole app state as one link.
@@ -61,10 +62,12 @@ export interface SharedState {
     gl?: [string] | [string, number, number]
     /** selected ship cast */
     ca?: string
-    /** ship-cast layer's year range, inclusive */
+    /** ship-cast year range, inclusive: early v2-ios links, read as an `of` year range */
     cy?: [number, number]
-    tab?: 'explore' | 'analysis' | 'comparison' | 'crossSection'
-    ev?: 'series' | 'model-depth' | 'sensor-depth' | 'glider' | 'cast'
+    /** observation-period filter (utils/obsFilter.ts), when one is set */
+    of?: ObsFilter
+    tab?: BottomTab
+    ev?: 'series' | 'model-depth' | 'sensor-depth' | 'glider'
     bin?: BinMode
     /** Explore's time-depth window anchor (windowEnd), epoch ms */
     we?: number
@@ -77,6 +80,9 @@ export interface SharedState {
     cse?: string  // comparison season
     /** cross-section polyline, [[lat, lng], …] */
     xs?: [number, number][]
+    /** Area tab box, [lat, lng, radius km, depth min, depth max], and its variable */
+    ar?: [number, number, number, number, number]
+    av?: string
     /** view chrome */
     ui?: {
         cp?: boolean   // control panel open
@@ -171,7 +177,7 @@ export function captureShareState(): SharedState {
             ? (s.gliderRange ? [s.selectedGliderId, ...s.gliderRange] : [s.selectedGliderId])
             : undefined,
         ca: s.selectedCastId ?? undefined,
-        cy: s.castPeriod ?? undefined,
+        of: isObsFilterActive(s.obsFilter) ? s.obsFilter : undefined,
         as: s.analysisSource,
         at: s.analysisTab,
         ase: s.analysisSeason,
@@ -180,6 +186,10 @@ export function captureShareState(): SharedState {
         xs: s.crossSectionLine?.length
             ? s.crossSectionLine.map(p => [round(p.lat), round(p.lng)] as [number, number])
             : undefined,
+        ar: s.obsArea
+            ? [round(s.obsArea.lat), round(s.obsArea.lng), s.obsArea.radiusKm, s.obsArea.depthMin, s.obsArea.depthMax]
+            : undefined,
+        av: s.obsArea ? s.obsAreaVariable : undefined,
         ui: {
             cp: s.isControlPanelOpen,
             cpw: s.controlPanel_width,
@@ -224,7 +234,8 @@ export function applyShareState(state: SharedState): void {
     if (state.we) s.pendingWindowEnd = state.we
 
     if (state.tab) s.activeBottomTab = state.tab
-    if (state.ev) s.exploreView = state.ev
+    // Links from before the cast view moved to the profile drawer may say 'cast'.
+    if (state.ev && (state.ev as string) !== 'cast') s.exploreView = state.ev
     if (state.bin) s.exploreBinMode = state.bin
     if (state.as) s.analysisSource = state.as
     if (state.at) s.analysisTab = state.at
@@ -248,8 +259,15 @@ export function applyShareState(state: SharedState): void {
 
     // Direct, like the glider: the shared Explore view already says where it shows.
     if (state.ca) s.selectedCastId = state.ca
-    if (state.cy) s.setCastPeriod(state.cy)
+    const of = parseObsFilter(state.of)
+        ?? (state.cy ? parseObsFilter({ from: `${state.cy[0]}-01-01`, to: `${state.cy[1] + 1}-01-01` }) : null)
+    if (of) s.obsFilter = of
 
+    if (Array.isArray(state.ar) && state.ar.length === 5 && state.ar.every(Number.isFinite)) {
+        const [lat, lng, radiusKm, depthMin, depthMax] = state.ar
+        s.setObsArea({ lat, lng, radiusKm, depthMin, depthMax })
+    }
+    if (typeof state.av === 'string') s.setObsAreaVariable(state.av)
     if (state.xs?.length) s.setCrossSectionLine(state.xs.map(([lat, lng]) => ({ lat, lng })))
 
     const ui = state.ui

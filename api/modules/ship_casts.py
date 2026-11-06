@@ -5,8 +5,8 @@ A cast is one vertical profile at one position and moment, so it lives in
 limited to a model's domain or period: the archive runs back to 1930 and well
 beyond BC, and a model comparison is offered only where a model has data.
 
-`cast_years()` feeds the layer's period picker, `list_casts()` the map points
-for a period, and `cast_profile()` one cast's profiles (plus, for a modelled
+`cast_years()` feeds the observation-period picker's coverage strip,
+`list_casts()` the map points matching that period, and `cast_profile()` one cast's profiles (plus, for a modelled
 variable, the model's profile at the nearest cell and time when there is one).
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from modules.extract_profile import extract_profile
 from shared.variable_config import load_variable_config
 
 # A period's points go to the map in one response; past this many the map
-# would be unreadable anyway, so the picker steers to a shorter period.
+# keeps the latest and the period picker says how many it left out.
 MAX_CASTS = 20_000
 
 logger = logging.getLogger(__name__)
@@ -73,28 +73,76 @@ def cast_years() -> list[dict]:
     return list(years.values())
 
 
-def list_casts(from_date: str, to_date: str) -> dict:
-    """Casts with `from_date <= time < to_date`, for the map."""
-    t_from, t_to = _parse_day(from_date, "from"), _parse_day(to_date, "to")
-    if t_to <= t_from:
+def cast_filter_sql(from_date: Optional[str] = None, to_date: Optional[str] = None,
+                    months: Optional[list[int]] = None, doy: Optional[int] = None,
+                    half_days: Optional[int] = None, column: str = "time") -> tuple[str, dict]:
+    """WHERE clause and parameters for the observation-period filter
+    (front/app/utils/obsFilter.ts) on `column`: `from <= time < to`, calendar
+    months (1-12), and a day-of-year window `doy ± half_days` in every year
+    that wraps across New Year. Day/night is `daylight_sql`'s, as it needs a
+    position."""
+    where, params = [], {}
+    if from_date:
+        where.append(f"{column} >= {{f:DateTime64(0)}}")
+        params["f"] = _parse_day(from_date, "from")
+    if to_date:
+        where.append(f"{column} < {{t:DateTime64(0)}}")
+        params["t"] = _parse_day(to_date, "to")
+    if from_date and to_date and params["t"] <= params["f"]:
         raise ValueError("'to' must be after 'from'")
+    if months:
+        if any(m < 1 or m > 12 for m in months):
+            raise ValueError("months must be 1-12")
+        where.append(f"toMonth({column}) IN {{m:Array(UInt8)}}")
+        params["m"] = sorted(set(months))
+    if doy is not None:
+        if not 1 <= doy <= 366 or half_days is None or not 0 <= half_days <= 182:
+            raise ValueError("doy must be 1-366 with half_days 0-182")
+        where.append(f"least(abs(toInt32(toDayOfYear({column})) - {{c:Int32}}), "
+                     f"365 - abs(toInt32(toDayOfYear({column})) - {{c:Int32}})) <= {{h:Int32}}")
+        params.update(c=doy, h=half_days)
+    return (" AND ".join(where) or "1"), params
+
+
+def daylight_sql(time: str, lat: str, lon: str) -> str:
+    """SQL true while the sun's centre is above -0.833° (sunrise to sunset, as
+    SunCalc's in obsFilter.ts) at `lat`/`lon`, by NOAA's low-precision solar
+    position: within a minute or two of SunCalc, which is plenty for a
+    day/night split."""
+    g = f"(2 * pi() / 365 * (toDayOfYear({time}) - 1 + (toHour({time}) - 12) / 24))"
+    decl = (f"(0.006918 - 0.399912 * cos({g}) + 0.070257 * sin({g}) - 0.006758 * cos(2 * {g}) "
+            f"+ 0.000907 * sin(2 * {g}) - 0.002697 * cos(3 * {g}) + 0.00148 * sin(3 * {g}))")
+    eqt = (f"(229.18 * (0.000075 + 0.001868 * cos({g}) - 0.032077 * sin({g}) "
+           f"- 0.014615 * cos(2 * {g}) - 0.040849 * sin(2 * {g})))")
+    ha = f"radians((toHour({time}) * 60 + toMinute({time}) + {eqt} + 4 * ({lon})) / 4 - 180)"
+    phi = f"radians({lat})"
+    return f"(sin({phi}) * sin({decl}) + cos({phi}) * cos({decl}) * cos({ha}) > sin(radians(-0.833)))"
+
+
+def list_casts(from_date: Optional[str] = None, to_date: Optional[str] = None,
+               months: Optional[list[int]] = None, doy: Optional[int] = None,
+               half_days: Optional[int] = None) -> dict:
+    """Casts matching the observation-period filter, latest first, for the map.
+    Past MAX_CASTS the latest are kept and `total` says how many matched."""
+    where, params = cast_filter_sql(from_date, to_date, months, doy, half_days)
     client = get_ch_client()
     try:
         rows = client.query(
             "SELECT cast_id, kind, time, latitude, longitude, mission_id, geographic_area, max_depth, variables "
-            "FROM ship_casts FINAL WHERE time >= {f:DateTime} AND time < {t:DateTime} "
-            "ORDER BY time LIMIT {n:UInt32}",
-            parameters={"f": t_from, "t": t_to, "n": MAX_CASTS + 1},
+            f"FROM ship_casts FINAL WHERE {where} ORDER BY time DESC LIMIT {{n:UInt32}}",
+            parameters={**params, "n": MAX_CASTS + 1},
         ).result_rows
+        truncated = len(rows) > MAX_CASTS
+        total = (client.query(f"SELECT count() FROM ship_casts FINAL WHERE {where}", parameters=params).first_row[0]
+                 if truncated else len(rows))
     finally:
         client.close()
-    truncated = len(rows) > MAX_CASTS
     casts = [{
         "id": r[0], "kind": r[1], "time": _iso(r[2]),
         "lat": round(float(r[3]), 5), "lon": round(float(r[4]), 5),
         "mission": r[5], "area": r[6], "maxDepth": round(float(r[7]), 1), "variables": list(r[8]),
     } for r in rows[:MAX_CASTS]]
-    return {"casts": casts, "truncated": truncated, "variables": variable_meta()}
+    return {"casts": casts, "truncated": truncated, "total": int(total), "variables": variable_meta()}
 
 
 def _model_profile(source: str, var: str, lat: float, lon: float, t: datetime) -> tuple[Optional[dict], Optional[dict]]:

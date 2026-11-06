@@ -49,7 +49,7 @@ import { ref, computed, watch } from 'vue'
 import { useMainStore } from '~/stores/main'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
-import { fetchGliderSection, type GliderSectionResponse } from '~~/composables/useGliderSectionFetch'
+import { fetchGliderSection, sectionInPeriod, type GliderSectionResponse } from '~~/composables/useGliderSectionFetch'
 import GliderSectionChart, { type SectionLayer } from './GliderSectionChart.vue'
 import ChartContextBar, { type ContextItem } from '../ChartContextBar.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -114,7 +114,9 @@ watch([section, () => mainStore.gliderRange], async ([s, range]) => {
   }
 }, { immediate: true })
 
-function toLayer(s: GliderSectionResponse): SectionLayer {
+// Columns outside the observation period are blanked, as the map clips the track.
+function toLayer(raw: GliderSectionResponse): SectionLayer {
+  const s = sectionInPeriod(raw, mainStore.obsResolved)
   return {
     profiles: s.profiles,
     profileEnd: s.profileEnd,

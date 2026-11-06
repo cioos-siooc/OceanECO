@@ -11,6 +11,25 @@ e.g. % of area with Ω aragonite < 1 or DO below hypoxic thresholds. Shellfish t
 inlets are areas, so this is the most management-relevant gap.
 - Reuse: mapbox-gl-draw wiring from Cross-Section (`index.vue`), `shared/grid_lookup.py` for cell selection.
 
+### Area tab: more views
+The observation box (`area/AreaPanel.vue`, `/obsArea`) has Points and Mean. Next: a monthly
+climatology across years, a time × depth heatmap for wide depth ranges (`TimeDepthHeatmap`),
+and the model at the circle's centre over the same depth range as an overlay.
+
+### Area tab: make the Mean scientifically defensible
+Points (each source kept distinct) is fine; the Mean mixes platforms and can be challenged on:
+- **Units/correctness first:** 12 ERDDAP DO sensors are stored unconverted, so the Mean can average
+  mixed units; confirm all DO is µmol/kg before combining.
+- **Non-comparable methods:** extracted bottle chl vs in-situ fluorometer chl (factor 2–5 apart) are
+  both `chlorophyll`; split them into separate variables. Same rule for future pH (scale/method).
+- **Composition artifacts:** the mean jumps when a mooring starts/ends or a cruise passes. Show per-bin
+  contributors (n, source types) and between-platform spread, and label it a "composite of available
+  observations".
+- **Anomaly mode:** subtract each platform's own climatology before combining. This is the standard
+  merge method, and it removes offset, depth and composition bias.
+- Depth/season bias inside the box: casts are sample-weighted, not depth-weighted, and cruise-seasonal.
+  Depth stratification is covered by the time × depth heatmap above.
+
 ### Threshold alerts + "current conditions" panel
 Surface where sensors or model regions are corrosive/hypoxic *now* (latest data or forecast), with
 optional per-site email/RSS subscriptions.

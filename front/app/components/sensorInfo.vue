@@ -67,13 +67,13 @@
                         </template>
                     </UPopover>
                 </div>
+                <ObsPeriodFilter />
             </div>
 
-            <div v-if="filteredSensors.length === 0" class="text-center text-muted p-4">
-                No sensors match your filters.
-            </div>
-
-            <div v-else class="sensors__list">
+            <div class="sensors__list">
+                <div v-if="filteredSensors.length === 0" class="text-center text-muted p-4">
+                    No sensors match your filters.
+                </div>
                 <div v-for="sensor in sortedSensors" :key="sensor.id" :ref="setSensorRef(sensor.id)"
                     role="button" tabindex="0" class="srow" :class="{ 'srow--on': sensor.id === selectedSensor?.id }"
                     @click="selectSensor(sensor.id)" @keydown.enter="selectSensor(sensor.id)"
@@ -122,15 +122,17 @@
                 <!-- C-PROOF gliders: a deployment moves, so a row shows its
                      mission window and distance flown instead of a depth. -->
                 <template v-if="mainStore.gliders.length">
-                    <div class="sgroup oe-label">Gliders · {{ mainStore.gliders.length }}</div>
-                    <div v-for="g in mainStore.gliders" :key="g.id"
+                    <div class="sgroup oe-label">Gliders · {{ mainStore.filteredGliders.length }}</div>
+                    <div v-for="g in mainStore.filteredGliders" :key="g.id"
                         role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
                         @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
                         @mouseenter="mainStore.hoveredGliderId = g.id" @mouseleave="mainStore.hoveredGliderId = null">
                         <span class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
                             :title="g.active ? 'Live: on mission now' : 'Recovered'" />
                         <span class="srow__name">{{ g.id }}</span>
-                        <span class="srow__depth oe-num">{{ Math.round(g.distanceKm) }} km</span>
+                        <span class="srow__depth oe-num" :title="mainStore.gliderClips ? 'Along-track distance inside the observation period, of the whole mission' : undefined">
+                            <template v-if="mainStore.gliderClips?.[g.id]">{{ Math.round(mainStore.gliderClips[g.id]!.km) }} of </template>{{ Math.round(g.distanceKm) }} km
+                        </span>
                         <span class="srow__sub oe-num">
                             <span>C-PROOF</span>
                             <span class="srow__vars">{{ g.variables.map(v => variableShort(v)).join(' ') }} · glider</span>
@@ -153,20 +155,17 @@
                 </template>
 
                 <!-- DFO IOS ship casts: too many to list (124k since 1930), so
-                     the group picks the period the map shows and details the
-                     selected cast; casts are picked on the map. -->
+                     the group counts those in the observation period and
+                     details the selected cast; casts are picked on the map. -->
                 <template v-if="mainStore.castYears.length">
                     <div class="sgroup oe-label">
-                        Ship casts · {{ mainStore.casts.length.toLocaleString('en-CA') }}<template v-if="mainStore.castsTruncated">+</template>
+                        Ship casts · {{ mainStore.castsTotal.toLocaleString('en-CA') }}
                     </div>
-                    <div class="cast-period">
-                        <USelect v-model="castFrom" :items="castYearItems" size="xs" aria-label="First year of ship casts shown" />
-                        <span class="text-muted text-xs">to</span>
-                        <USelect v-model="castTo" :items="castYearItems" size="xs" aria-label="Last year of ship casts shown" />
-                        <span v-if="mainStore.castsTruncated" class="text-xs text-muted" title="The map shows the first 20,000; pick a shorter period">first 20,000</span>
+                    <div v-if="mainStore.castsTruncated" class="cast-period text-xs text-muted">
+                        Showing the latest {{ mainStore.casts.length.toLocaleString('en-CA') }} of {{ mainStore.castsTotal.toLocaleString('en-CA') }}; narrow the observation period for the rest.
                     </div>
                     <div v-if="selectedCast" class="srow srow--on" role="button" tabindex="0"
-                        @click="mainStore.setExploreView('cast')" @keydown.enter="mainStore.setExploreView('cast')">
+                        @click="mainStore.setIsVerticalProfileOpen(true)" @keydown.enter="mainStore.setIsVerticalProfileOpen(true)">
                         <span class="srow__dot srow__dot--historic" />
                         <span class="srow__name">{{ selectedCast.mission || selectedCast.id }}</span>
                         <span class="srow__depth oe-num">{{ Math.round(selectedCast.maxDepth) }} m</span>
@@ -211,6 +210,7 @@ import { ref, computed, watch, nextTick, type ComponentPublicInstance } from 'vu
 import { sensorIsRealtime } from '~~/composables/useSensorStatus';
 import { coordTxt, depth2txt, formatDataRange } from '~~/composables/useSensorFormat';
 import SensorInfoDialog from './SensorInfoDialog.vue';
+import ObsPeriodFilter from './obs/ObsPeriodFilter.vue';
 import { useVariableRegistry } from '~~/composables/useVariableRegistry';
 import { trackEvent } from '~~/composables/useAnalytics';
 import { sensorInstruments } from '~~/composables/useSensorTimeseries';
@@ -267,18 +267,6 @@ function clearFilters() {
     variableFilter.value = [];
 }
 
-// Ship casts: the map shows one year range at a time (mainStore.castPeriod).
-const castYearItems = computed(() => [...mainStore.castYears].reverse().map(y => ({
-    value: y.year, label: `${y.year} (${(y.ctd + y.bottle).toLocaleString('en-CA')})`,
-})));
-const castFrom = computed({
-    get: () => mainStore.castPeriod?.[0],
-    set: (y: number | undefined) => { if (y != null) mainStore.setCastPeriod([y, mainStore.castPeriod?.[1] ?? y]); },
-});
-const castTo = computed({
-    get: () => mainStore.castPeriod?.[1],
-    set: (y: number | undefined) => { if (y != null) mainStore.setCastPeriod([mainStore.castPeriod?.[0] ?? y, y]); },
-});
 const selectedCast = computed(() => mainStore.casts.find(c => c.id === mainStore.selectedCastId) ?? null);
 
 const mergeDistance = computed({

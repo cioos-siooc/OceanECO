@@ -3,13 +3,30 @@ import { defineStore } from 'pinia'
 import { chart as chartPalette } from '@/config/palette';
 import { trackEvent } from '~~/composables/useAnalytics';
 import { mergeSensors, resolveMergedId, type MergeableSensor } from '@/utils/sensorMerge';
+import { NO_OBS_FILTER, clipTrack, matchingIntervals, monthMatches, pathKm, resolveObsFilter, type ObsFilter, type ResolvedObsFilter } from '@/utils/obsFilter';
 
 // Depths are plain numbers (the WebP filename stem too, e.g. 18.0 -> "18.0.webp")
 // — -1 is the synthetic bottom-layer sentinel ("bottom.webp").
-export type ExploreView = 'series' | 'model-depth' | 'sensor-depth' | 'glider' | 'cast'
+export type ExploreView = 'series' | 'model-depth' | 'sensor-depth' | 'glider'
 
 /** A sensor as `GET /sensors` returns it, or a display-time merge of several (`members`). */
 export type Sensor = MergeableSensor
+
+/** Footer panes (explore, crossSection, area) and fullscreen workspaces (analysis, comparison). */
+export type BottomTab = 'explore' | 'analysis' | 'comparison' | 'crossSection' | 'area'
+
+/**
+ * The Area tab's 4D box: a circle drawn on the map and a depth range. The
+ * fourth dimension is the observation period (`obsFilter`), shared with the
+ * map's layers.
+ */
+export interface ObsArea {
+    lat: number
+    lng: number
+    radiusKm: number
+    depthMin: number
+    depthMax: number
+}
 
 /** One DFO IOS ship cast (CTD or rosette bottle), as `GET /casts` lists it. */
 export interface ShipCast {
@@ -50,8 +67,15 @@ export interface GliderDeployment {
     fileUrl: string
     variant: string
     active: boolean
-    /** [lon, lat], simplified to the track's shape. */
-    track: [number, number][]
+    /** [lon, lat, unix seconds], simplified to the track's shape. */
+    track: [number, number, number][]
+}
+
+/** A glider deployment's track cut to the observation period. */
+export interface GliderClip {
+    segments: [number, number][][]
+    /** Along-track distance inside the period, scaled to the full-resolution `distanceKm`. */
+    km: number
 }
 
 export function formatDepthLabel(depth: number): string {
@@ -142,16 +166,23 @@ function createInitialState() {
         showSeafloor: true,
         // With a glider selected, the other tracks are faded; false hides them.
         showOtherGliders: true,
-        // DFO IOS ship casts (`GET /casts`): one period's points at a time, as
-        // the archive (124k casts since 1930) is too many to draw at once.
+        // DFO IOS ship casts (`GET /casts`): those matching the observation
+        // period, latest first; the archive (124k casts since 1930) is capped
+        // at the API's MAX_CASTS, and `castsTotal` says how many matched.
         casts: [] as ShipCast[],
         castsTruncated: false,
+        castsTotal: 0,
         castVariables: {} as Record<string, CastVariableMeta>,
         castYears: [] as Array<{ year: number, ctd: number, bottle: number }>,
-        // Inclusive year range the map shows; null until `/casts/years`
-        // answers, then the latest year with casts.
-        castPeriod: null as [number, number] | null,
         selectedCastId: null as string | null,
+
+        // Observation-period filter (utils/obsFilter.ts): one date selection
+        // for every observation layer — sensors, gliders and casts. Model
+        // layers follow the map date instead.
+        obsFilter: { ...NO_OBS_FILTER } as ObsFilter,
+        // Sensor id -> YYYYMM months with data (`GET /sensors/coverage`), so a
+        // sensor shows only when it has data in the period.
+        sensorCoverage: {} as Record<string, number[]>,
         showCastLayer: true,
 
         // Sensor panel filters — shared with the map so markers stay in sync with the sensor list.
@@ -204,7 +235,7 @@ function createInitialState() {
         // 'analysis'/'comparison' are fullscreen workspaces: they take a
         // coordinate as input and then have nothing more to say to the map, so
         // showing the map behind them is wasted space.
-        activeBottomTab: 'explore' as 'explore' | 'analysis' | 'comparison' | 'crossSection',
+        activeBottomTab: 'explore' as BottomTab,
 
         // The polyline drawn on the map for the Cross-Section tab, in vertex
         // order. Null until the user finishes drawing a line.
@@ -215,6 +246,13 @@ function createInitialState() {
         // re-arm line-drawing mode — a plain counter rather than a boolean so a
         // click while already mid-redraw still fires the watcher.
         crossSectionRedrawToken: 0,
+
+        // Area tab: the drawn circle and depth range, the variable it reads,
+        // and a counter its "Redraw" button bumps to re-arm drawing (index.vue
+        // owns the map, as for the cross-section line).
+        obsArea: null as ObsArea | null,
+        obsAreaVariable: 'temperature',
+        obsAreaDrawToken: 0,
 
         // Which record the Analysis tab runs against. Was a whole separate tab
         // ("Sensor Analysis") until the two were merged behind one surface.
@@ -297,9 +335,27 @@ export const useMainStore = defineStore('main', {
             return state.sensors.find((s) => s.id === sel.id)?.depth === -1 ? sel.id : null;
         },
 
-        filteredSensors(state) {
+        /** The observation-period filter with the map date applied. */
+        obsResolved(state): ResolvedObsFilter {
+            // Reads the map date only when the period follows it, so stepping
+            // the map leaves every filtered list alone otherwise.
+            const f = state.obsFilter;
+            return resolveObsFilter(f, f.around ? state.selected_variable.dt?.valueOf() ?? null : null);
+        },
+
+        filteredSensors(state): Sensor[] {
             const q = state.sensorSearchQuery.trim().toLowerCase();
+            const period: ResolvedObsFilter = this.obsResolved;
+            const t = (iso: string | null) => (iso ? Date.parse(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`) : NaN);
+            const inPeriod = (s: Sensor) => {
+                if (!period.active) return true;
+                // A cheap, exact cut on the data's own span first.
+                if (period.from != null && !(t(s.latest_data_at) >= period.from)) return false;
+                if (period.to != null && !(t(s.first_data_at) < period.to)) return false;
+                return (s.members ?? [s]).some(m => state.sensorCoverage[m.id]?.some(ym => monthMatches(period, ym)));
+            };
             return state.sensors.filter((sensor) => {
+                if (!inPeriod(sensor)) return false;
                 if (q && !sensor.name.toLowerCase().includes(q) && !(sensor.organization ?? '').toLowerCase().includes(q)) {
                     return false;
                 }
@@ -312,6 +368,45 @@ export const useMainStore = defineStore('main', {
                 }
                 return true;
             });
+        },
+
+        /**
+         * Each glider track cut to the observation period, by id; null while
+         * the filter is off (every track shows whole). A deployment with no
+         * matching stretch is absent.
+         */
+        gliderClips(state): Record<string, GliderClip> | null {
+            const period: ResolvedObsFilter = this.obsResolved;
+            if (!period.active) return null;
+            const out: Record<string, GliderClip> = {};
+            for (const g of state.gliders) {
+                if (g.track.length < 2) continue;
+                const t0 = g.track[0]![2] * 1000, t1 = g.track[g.track.length - 1]![2] * 1000;
+                const mid = g.track[g.track.length >> 1]!;
+                const segments = clipTrack(g.track, matchingIntervals(period, t0, t1, mid[1], mid[0]));
+                if (!segments.length) continue;
+                const whole = pathKm(g.track);
+                const km = whole > 0 ? g.distanceKm * segments.reduce((a, s) => a + pathKm(s), 0) / whole : 0;
+                out[g.id] = { segments, km };
+            }
+            return out;
+        },
+
+        filteredGliders(state): GliderDeployment[] {
+            const clips: Record<string, GliderClip> | null = this.gliderClips;
+            return clips ? state.gliders.filter(g => clips[g.id]) : state.gliders;
+        },
+
+        /** What the map shows, as the Area tab's query names it: stored
+         *  sensor ids (a merge's members), glider deployments, and casts. */
+        visibleObsSources(state): { sensorIds: string[], gliderIds: string[], casts: boolean } {
+            const sensors: Sensor[] = this.filteredSensors;
+            const gliders: GliderDeployment[] = this.filteredGliders;
+            return {
+                sensorIds: state.showSensorLayer ? sensors.flatMap(s => (s.members ? s.members.map(m => m.id) : [s.id])) : [],
+                gliderIds: state.showGliderLayer ? gliders.map(g => g.id) : [],
+                casts: state.showCastLayer && state.castYears.length > 0,
+            };
         },
     },
 
@@ -416,36 +511,39 @@ export const useMainStore = defineStore('main', {
             if (sensor && this.selectedGliderId) this.selectGlider(null);
             if (sensor && this.selectedCastId) this.selectCast(null);
         },
-        setCasts(payload: { casts: ShipCast[], truncated: boolean, variables: Record<string, CastVariableMeta> }) {
+        setCasts(payload: { casts: ShipCast[], truncated: boolean, total?: number, variables: Record<string, CastVariableMeta> }) {
             this.casts = payload.casts;
             this.castsTruncated = payload.truncated;
+            this.castsTotal = payload.total ?? payload.casts.length;
             this.castVariables = payload.variables;
         },
         setCastYears(years: Array<{ year: number, ctd: number, bottle: number }>) {
             this.castYears = years;
-            if (!this.castPeriod && years.length) {
-                const latest = years[years.length - 1]!.year;
-                this.castPeriod = [latest, latest];
-            }
         },
-        setCastPeriod(period: [number, number]) {
-            const [a, b] = period;
-            this.castPeriod = a <= b ? [a, b] : [b, a];
+        setObsFilter(filter: ObsFilter) {
+            const f = { ...filter, months: [...filter.months].sort((a, b) => a - b) };
+            if (f.from && f.to && f.to <= f.from) [f.from, f.to] = [f.to, f.from];
+            if (JSON.stringify(f) !== JSON.stringify(this.obsFilter)) trackEvent('obs_filter_changed', { filter: JSON.stringify(f) });
+            this.obsFilter = f;
+        },
+        setSensorCoverage(coverage: Record<string, number[]>) {
+            this.sensorCoverage = coverage;
         },
         setShowCastLayer(value: boolean) {
             this.showCastLayer = value;
         },
-        /** Select a ship cast (or clear with null) and show its profiles in Explore. */
+        /**
+         * Select a ship cast (or clear with null). Its profiles take over the
+         * right-hand vertical-profile drawer, where the model's profiles live.
+         */
         selectCast(id: string | null) {
             if (id && id !== this.selectedCastId) trackEvent('cast_selected', { cast: id });
             this.selectedCastId = id;
             if (id) {
                 if (this.selectedSensor?.id) this.selectedSensor = null;
                 if (this.selectedGliderId) this.selectGlider(null);
-                this.setExploreView('cast');
-                if (this.activeBottomTab !== 'explore') this.setActiveBottomTab('explore');
+                this.isVerticalProfileOpen = true;
             }
-            else if (this.exploreView === 'cast') this.setExploreView('series');
         },
         setGliders(gliders: GliderDeployment[]) {
             this.gliders = gliders;
@@ -560,6 +658,23 @@ export const useMainStore = defineStore('main', {
             this.crossSectionRedrawToken++;
         },
 
+        setObsArea(area: ObsArea | null) {
+            if (area) {
+                const depthMin = Math.max(0, Math.min(area.depthMin, area.depthMax));
+                area = { ...area, radiusKm: Math.min(200, Math.max(0.1, area.radiusKm)), depthMin, depthMax: Math.max(depthMin, area.depthMax) };
+                if (!this.obsArea) trackEvent('obs_area_drawn', { radius_km: Math.round(area.radiusKm) });
+            }
+            this.obsArea = area;
+        },
+
+        setObsAreaVariable(variable: string) {
+            this.obsAreaVariable = variable;
+        },
+
+        requestObsAreaRedraw() {
+            this.obsAreaDrawToken++;
+        },
+
         setMapCenter(center: { lat: number, lng: number } | null) {
             this.mapCenter = center;
         },
@@ -591,7 +706,7 @@ export const useMainStore = defineStore('main', {
             this.queryMode = mode;
         },
 
-        setActiveBottomTab(tab: 'explore' | 'analysis' | 'comparison' | 'crossSection') {
+        setActiveBottomTab(tab: BottomTab) {
             if (tab !== this.activeBottomTab) {
                 trackEvent('tab_switched', { from_tab: this.activeBottomTab, to_tab: tab });
             }

@@ -354,7 +354,8 @@ CREATE TABLE IF NOT EXISTS default.ship_casts
     dataset          LowCardinality(String),
     kind             LowCardinality(String),
     mission_id       String,
-    time             DateTime,
+    -- DateTime64: casts reach back to 1930, before DateTime's 1970 epoch.
+    time             DateTime64(0),
     latitude         Float64,
     longitude        Float64,
     geographic_area  String,

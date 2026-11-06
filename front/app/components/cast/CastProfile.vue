@@ -1,14 +1,17 @@
 <template>
   <div class="flex flex-col h-full min-h-0">
-    <div class="flex items-center mb-2" style="gap:8px;">
-      <!-- Explore's own sub-view switch, passed in so it stays in one place. -->
-      <slot name="views" />
-      <SegmentedControl v-if="varItems.length" v-model="castVar" :items="varItems" size="xs" aria-label="Cast variable" />
-      <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
-      <div class="grow" />
+    <div class="flex items-center" style="height: 38px; gap: 4px;">
+      <div class="cast-header grow">
+        <div class="cast-title truncate">{{ cast ? `${kindLabel} · ${cast.mission || cast.id}` : 'Ship cast' }}</div>
+        <div class="cast-subtitle truncate oe-num">{{ timeLabel || '–' }}</div>
+      </div>
+      <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary shrink-0" />
       <DownloadButton :datasets="csvDatasets" size="xs" class="shrink-0" />
-      <span v-if="cast" class="range-label oe-num">{{ kindLabel }} · {{ timeLabel }}</span>
+      <UButton variant="ghost" color="neutral" size="xs" icon="i-mdi-close" class="shrink-0"
+        aria-label="Close cast" title="Back to the model profile" @click="emit('close')" />
     </div>
+
+    <USelect v-if="varItems.length" v-model="castVar" :items="varItems" size="xs" class="w-full mb-2" aria-label="Cast variable" />
 
     <UAlert v-if="loadError" color="error" variant="subtle" class="mb-2 shrink-0" :description="loadError" />
 
@@ -25,14 +28,13 @@ import axios from 'axios'
 import moment from 'moment-timezone'
 import * as echarts from 'echarts'
 import { useRuntimeConfig } from '#app'
-import { useMainStore, type CastVariableMeta } from '~/stores/main'
+import { useMainStore } from '~/stores/main'
 import { APP_TIMEZONE } from '@/config/app'
 import { chart as palette } from '@/config/palette'
-import { useVariableRegistry } from '~~/composables/useVariableRegistry'
+import { useObsVariable } from '~~/composables/useObsVariable'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { csvMeta, csvTimestamp, provideCsvExport, type CsvContext, type CsvDataset } from '~~/composables/useCsvExport'
 import ChartContextBar, { type ContextItem } from '../ChartContextBar.vue'
-import SegmentedControl from '../ui/SegmentedControl.vue'
 import DownloadButton from '../ui/DownloadButton.vue'
 
 /**
@@ -56,9 +58,11 @@ interface CastProfileResponse {
 
 const ERDDAP = 'https://data.cioospacific.ca/erddap/tabledap'
 
+const emit = defineEmits<{ close: [] }>()
+
 const mainStore = useMainStore()
 const config = useRuntimeConfig()
-const { toDisplayValue, displayUnit, formatDisplayValue } = useVariableRegistry()
+const { metaOf, unitOf, show, fmt } = useObsVariable()
 
 const data = ref<CastProfileResponse | null>(null)
 const loading = ref(false)
@@ -66,7 +70,6 @@ const loadError = ref<string | null>(null)
 const cast = computed(() => data.value?.cast ?? null)
 
 // ── Variable ────────────────────────────────────────────────────────────────
-const metaOf = (v: string): CastVariableMeta | undefined => mainStore.castVariables[v]
 const available = computed(() => {
   const present = new Set(Object.keys(data.value?.profiles ?? {}))
   // Registry order (model variables first), so every cast lists them alike.
@@ -90,20 +93,8 @@ const castVar = computed<string>({
     }
   },
 })
-const varItems = computed(() => available.value.map(v => ({ value: v, label: metaOf(v)?.short ?? v, title: metaOf(v)?.name })))
+const varItems = computed(() => available.value.map(v => ({ value: v, label: metaOf(v)?.name ?? v })))
 const modelled = computed(() => !!metaOf(castVar.value)?.modelled)
-
-// Modelled variables follow the user's unit preference; observation-only ones
-// have a single unit, straight from the registry's observed section.
-const unitOf = (v: string) => (metaOf(v)?.modelled ? displayUnit(v) : metaOf(v)?.unit ?? '')
-const show = (v: string, x: number) => (metaOf(v)?.modelled ? toDisplayValue(v, x) : x)
-function fmt(v: string, x: number | null | undefined): string {
-  if (x == null || !Number.isFinite(x)) return '—'
-  if (metaOf(v)?.modelled) return formatDisplayValue(v, x, { unit: true })
-  const step = metaOf(v)?.precision ?? 0.01
-  const decimals = Math.min(3, Math.max(0, Math.ceil(-Math.log10(step))))
-  return `${x.toFixed(decimals)}${unitOf(v) ? ` ${unitOf(v)}` : ''}`
-}
 
 // ── Fetch ───────────────────────────────────────────────────────────────────
 // Every variable's profile comes in one response; the model half only for the
@@ -152,8 +143,7 @@ const contextItems = computed<ContextItem[]>(() => {
   const c = cast.value
   if (!c) return []
   const items: ContextItem[] = [
-    { label: 'Cast', value: `${kindLabel.value} · ${c.mission || c.id}`, title: `IOS profile ${c.id}${c.area ? ` · ${c.area}` : ''}` },
-    { label: 'Point', value: coordLabel.value },
+    { label: 'Point', value: coordLabel.value, title: `IOS profile ${c.id}${c.area ? ` · ${c.area}` : ''}` },
     { label: 'Range', value: `0–${Math.round(c.maxDepth)} m` },
   ]
   if (!modelled.value) items.push({ label: 'Model', value: 'not modelled', tone: 'muted' })
@@ -178,7 +168,7 @@ function render() {
   const series: echarts.SeriesOption[] = []
   if (obs) {
     series.push({
-      name: kindLabel.value, type: 'line', data: obs.depth.map((d, i) => [show(v, obs.value[i]!), d]),
+      name: 'Cast', type: 'line', data: obs.depth.map((d, i) => [show(v, obs.value[i]!), d]),
       showSymbol: isBottle, symbolSize: 6,
       lineStyle: { width: 1.5, color: palette.sensor }, itemStyle: { color: palette.sensor },
     })
@@ -186,27 +176,28 @@ function render() {
   if (model.value) {
     const m = model.value
     series.push({
-      name: modelLabel.value, type: 'line', data: m.depth.map((d, i) => [show(v, m.value[i]!), d]),
+      name: 'Model', type: 'line', data: m.depth.map((d, i) => [show(v, m.value[i]!), d]),
       showSymbol: true, symbolSize: 3,
       lineStyle: { width: 1.5, color: palette.model }, itemStyle: { color: palette.model },
     })
   }
   chart.setOption({
     animation: false,
-    legend: { top: 0, right: 8 },
-    grid: { left: 56, right: 24, top: 28, bottom: 40 },
+    legend: { top: 0, right: 4, itemWidth: 14, textStyle: { fontSize: 11 } },
+    grid: { left: 40, right: 14, top: 26, bottom: 40 },
     tooltip: {
       trigger: 'item',
       formatter: (p: unknown) => {
         const { seriesName, value } = p as { seriesName: string, value: [number, number] }
-        return `${seriesName}<br/>${label}: ${fmt(v, value?.[0])}<br/>${Number(value?.[1]).toFixed(1)} m below surface`
+        return `${seriesName === 'Model' ? modelLabel.value : kindLabel.value}<br/>${label}: ${fmt(v, value?.[0])}<br/>${Number(value?.[1]).toFixed(1)} m below surface`
       },
     },
     xAxis: {
       type: 'value', scale: true, name: unit ? `${label} (${unit})` : label,
-      nameLocation: 'middle', nameGap: 26, axisLabel: { hideOverlap: true },
+      // A 300px-wide drawer fits about four labels, as the model profile's does.
+      nameLocation: 'middle', nameGap: 26, splitNumber: 4, axisLabel: { hideOverlap: true },
     },
-    yAxis: { type: 'value', inverse: true, name: 'Depth (m)', nameLocation: 'middle', nameGap: 40, min: 0 },
+    yAxis: { type: 'value', inverse: true, name: 'Depth (m)', nameLocation: 'middle', nameGap: 28, min: 0 },
     series,
   }, true)
 }
@@ -272,6 +263,9 @@ csvExport.register((): CsvDataset[] => {
 </script>
 
 <style scoped>
+.cast-header { min-width: 0; line-height: 1.25; }
+.cast-title { font-weight: 500; font-size: 12.5px; color: var(--ui-text); }
+.cast-subtitle { font-size: 11px; color: var(--ui-text-muted); }
 .cast-chart {
   flex: 1 1 auto;
   min-height: 0;

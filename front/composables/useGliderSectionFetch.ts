@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { useRuntimeConfig } from '#app';
 import { createRequestCache } from './useRequestCache';
+import { matchesTime, type ResolvedObsFilter } from '@/utils/obsFilter';
 
 /**
  * One variable of a glider deployment, or of a profile-number window of it,
@@ -34,4 +35,16 @@ export function fetchGliderSection(deployment: string, variable: string, range?:
         });
         return response.data;
     });
+}
+
+/**
+ * The section with every column outside the observation period blanked, so
+ * the Explore section and the map curtain show only what the clipped track
+ * does. A column is judged by its middle profile's time and position.
+ */
+export function sectionInPeriod(s: GliderSectionResponse, period: ResolvedObsFilter): GliderSectionResponse {
+    if (!period.active) return s;
+    const keep = s.time.map((t, i) => matchesTime(period, Date.parse(t), s.lat[i], s.lon[i]));
+    if (keep.every(Boolean)) return s;
+    return { ...s, values: s.values.map(row => row.map((v, c) => (keep[c] ? v : null))) };
 }
