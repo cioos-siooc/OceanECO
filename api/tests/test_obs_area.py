@@ -99,3 +99,14 @@ def test_wide_bins_are_datetimes(unit):
     # ClickHouse's toStartOfWeek/Month/Year return Dates, which don't sort
     # against the casts' datetimes.
     assert obs_area._BIN_SQL[unit].startswith("toDateTime(")
+
+
+def test_gliders_carry_sampled_fixes(monkeypatch):
+    client = FakeClient({
+        "grouparraysample": [("g1", [(-134.2, 49.2, 50.0), (-134.21, 49.21, 120.0)])],
+        "from glider_deployments final": [("g1",)],
+        "from glider_profiles": [("g1", datetime(2021, 2, 1), 7.1, 6.9, 7.3, 40, 80.0)],
+    })
+    monkeypatch.setattr(obs_area, "get_ch_client", lambda: client)
+    out = obs_area.obs_area("temperature", 49.2, -134.2, 30, 0, 500, glider_ids=["g1"], bin="day")
+    assert out["platforms"][0]["samples"] == [[-134.2, 49.2, 50.0], [-134.21, 49.21, 120.0]]

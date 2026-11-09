@@ -222,7 +222,9 @@ import useStationsInteraction from '~~/composables/useStationsInteraction';
 import { haversineM } from '@/utils/sensorMerge';
 import { addCastLayer, setCastLayerVisibility, setSelectedCast, CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
 import { addGliderLayer, setGliderTracks, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
-import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
+import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, setAreaVolume, cameraForAreaVolume, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
+import { hexToRgb } from '~~/composables/useFieldColorRamp';
+import { chart } from '@/config/palette';
 import { fetchSeafloorGrid } from '~~/composables/useSeafloorGrid';
 import { fetchGliderSection, sectionInPeriod } from '~~/composables/useGliderSectionFetch';
 import { isoDay, matchesTime } from '@/utils/obsFilter';
@@ -234,7 +236,7 @@ import ExplorePanel from '../components/ExplorePanel.vue'
 import ComparisonWorkspace from '../components/ComparisonWorkspace.vue'
 import CrossSectionPanel from '../components/crossSection/CrossSectionPanel.vue'
 import AreaPanel from '../components/area/AreaPanel.vue'
-import { useObsAreaLayer } from '~~/composables/useObsAreaLayer'
+import { useObsAreaLayer, circleRing } from '~~/composables/useObsAreaLayer'
 import PointSnapshot from '../components/snapshot/PointSnapshot.vue'
 import SegmentedControl from '../components/ui/SegmentedControl.vue'
 
@@ -585,6 +587,8 @@ onMounted(async () => {
                 depthMax: mainStore.obsArea?.depthMax ?? AREA_DEFAULT_DEPTH[1],
             }));
             syncAreaLayer();
+            updateAreaVolume();
+            if (areaBbox()) updateGliderSeafloor();
         }
     });
 
@@ -1315,20 +1319,29 @@ async function updateGliderCurtain() {
 // fieldRgbFn changes identity with the palette, range and display unit.
 watch([() => mainStore.selectedGliderId, () => mainStore.selected_variable.var, () => mainStore.gliderRange, fieldRgbFn], updateGliderCurtain);
 
-// The seafloor around the selected track, under the curtain: always the whole
+// The seafloor under the 3D views: around the Area tab's circle while that
+// tab is open, else around the selected glider's track — always the whole
 // deployment's area, so zooming the section doesn't reshape the terrain.
 let seafloorSeq = 0;
 let seafloorDeepestM = 0;
+function areaBbox(): [number, number, number, number] | null {
+    const a = mainStore.obsArea;
+    if (activeTab.value !== 'area' || !a) return null;
+    const ring = circleRing(a, 32);
+    const lons = ring.map(p => p[0]), lats = ring.map(p => p[1]);
+    return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+}
 async function updateGliderSeafloor() {
     const seq = ++seafloorSeq;
     const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
+    const bbox = areaBbox() ?? g?.bbox;
     seafloorDeepestM = 0;
-    if (!map || !g) {
+    if (!map || !bbox) {
         setGliderSeafloor(map, null);
         return;
     }
     try {
-        const grid = await fetchSeafloorGrid(g.bbox);
+        const grid = await fetchSeafloorGrid(bbox);
         if (seq !== seafloorSeq) return;
         seafloorDeepestM = grid.depth.reduce((a, d) => (d > a ? d : a), 0);
         setGliderSeafloor(map, grid, GLIDER_BASE_LAYER);
@@ -1338,7 +1351,7 @@ async function updateGliderSeafloor() {
         console.warn('glider seafloor failed:', e);
     }
 }
-watch(() => mainStore.selectedGliderId, updateGliderSeafloor);
+watch([() => mainStore.selectedGliderId, areaBbox], updateGliderSeafloor);
 watch(() => mainStore.showSeafloor, (v: boolean) => setGliderSeafloorVisibility(map, v));
 
 const GLIDER_TILT_PITCH = 60;
@@ -2126,6 +2139,37 @@ function syncAreaLayer() {
 watch([activeTab, () => mainStore.obsArea], syncAreaLayer);
 watch(() => mainStore.obsAreaDrawToken, () => {
     if (activeTab.value === 'area') areaLayer?.arm(true);
+});
+
+// The box in 3D under the circle, seen when the map is tilted
+// (useGliderCurtain.ts): a cylinder over the depth range, with the loaded
+// observations (mainStore.obsAreaMarkers) as dots at their depths.
+const AREA_RGB = hexToRgb(chart.model);
+function updateAreaVolume() {
+    const a = mainStore.obsArea;
+    if (!map || activeTab.value !== 'area' || !a) {
+        setAreaVolume(map, null);
+        return;
+    }
+    setAreaVolume(map, {
+        ...a,
+        rgb: AREA_RGB,
+        markers: mainStore.obsAreaMarkers.map(m => ({ ...m, rgb: hexToRgb(m.color) })),
+    }, GLIDER_BASE_LAYER);
+}
+watch([activeTab, () => mainStore.obsArea, () => mainStore.obsAreaMarkers], updateAreaVolume);
+
+// AreaPanel's 3D button: tilt onto the box (north up), or flatten.
+watch(() => mainStore.obsAreaTiltToken, () => {
+    const a = mainStore.obsArea;
+    if (!map || !a) return;
+    if (map.getPitch() > 10) {
+        map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
+        return;
+    }
+    // Fit the cylinder itself, both rims at their exaggerated depths.
+    const cam = cameraForAreaVolume(map, a, GLIDER_TILT_PITCH);
+    map.easeTo({ ...cam, bearing: 0, pitch: GLIDER_TILT_PITCH, duration: 1200 });
 });
 </script>
 

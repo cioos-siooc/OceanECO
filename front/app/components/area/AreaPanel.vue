@@ -36,6 +36,14 @@
         <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
         <div class="grow" />
         <UButton
+size="xs" variant="outline" color="neutral" :class="tilted ? 'oe-on' : ''" :aria-pressed="tilted"
+          title="Tilt the map to see the box and its observations in 3D (or flatten it)"
+          @click="mainStore.toggleObsAreaTilt()">3D</UButton>
+        <UButton
+size="xs" variant="outline" color="neutral" :class="mainStore.showSeafloor ? 'oe-on' : ''"
+          :aria-pressed="mainStore.showSeafloor" title="Show the seafloor around the circle when the map is tilted"
+          @click="mainStore.setShowSeafloor(!mainStore.showSeafloor)">Seafloor</UButton>
+        <UButton
 variant="subtle" size="xs" leading-icon="i-mdi-circle-outline"
           title="Press and drag on the map for a new circle" @click="mainStore.requestObsAreaRedraw()">
           Redraw
@@ -75,7 +83,7 @@ import axios from 'axios'
 import moment from 'moment-timezone'
 import * as echarts from 'echarts'
 import { useRuntimeConfig } from '#app'
-import { useMainStore, type ObsArea } from '~/stores/main'
+import { useMainStore, type ObsArea, type ObsAreaMarker } from '~/stores/main'
 import { APP_TIMEZONE } from '@/config/app'
 import { chart as palette } from '@/config/palette'
 import { describeObsFilter, isoDay } from '@/utils/obsFilter'
@@ -89,7 +97,10 @@ import SegmentedControl from '../ui/SegmentedControl.vue'
 
 type PlatformType = 'sensor' | 'glider' | 'ctd' | 'bottle'
 type Bin = 'hour' | 'day' | 'week' | 'month' | 'year'
-interface Platform { id: string, type: PlatformType, name: string, lat?: number, lon?: number, depth?: number | null, distanceKm?: number }
+interface Platform {
+  id: string, type: PlatformType, name: string, lat?: number, lon?: number, depth?: number | null, distanceKm?: number
+  samples?: [number, number, number][]   // a glider's (lon, lat, depth) fixes in the box
+}
 interface AreaResponse {
   variable: string
   bin: Bin
@@ -217,6 +228,35 @@ const TYPE_COLOR: Record<PlatformType, string> = {
   sensor: palette.instruments[1], glider: palette.instruments[2], ctd: palette.sensor, bottle: palette.instruments[3],
 }
 const TYPES: PlatformType[] = ['sensor', 'glider', 'ctd', 'bottle']
+
+const tilted = computed(() => (mainStore.mapView?.pitch ?? 0) > 10)
+
+// Where the observations sit, for the 3D box under the circle (index.vue):
+// a sensor or cast at its position and mean depth in the range, a glider at
+// a sample of its fixes.
+watch(data, (d) => {
+  const markers: ObsAreaMarker[] = []
+  if (d) {
+    const depthSum = new Map<number, [number, number]>()
+    d.points.platform.forEach((pi, i) => {
+      const a = depthSum.get(pi) ?? [0, 0]
+      a[0] += d.points.depth[i]!; a[1]++
+      depthSum.set(pi, a)
+    })
+    d.platforms.forEach((p, pi) => {
+      const color = TYPE_COLOR[p.type]
+      if (p.samples) {
+        for (const [lon, lat, depth] of p.samples) markers.push({ lon, lat, depth, color })
+        return
+      }
+      const s = depthSum.get(pi)
+      if (p.lat == null || p.lon == null || !s) return
+      markers.push({ lon: p.lon, lat: p.lat, depth: p.depth ?? s[0] / s[1], color })
+    })
+  }
+  mainStore.setObsAreaMarkers(markers)
+})
+onBeforeUnmount(() => mainStore.setObsAreaMarkers([]))
 
 const counts = computed(() => {
   const c: Record<PlatformType, number> = { sensor: 0, glider: 0, ctd: 0, bottle: 0 }

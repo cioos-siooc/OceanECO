@@ -28,6 +28,14 @@ export interface ObsArea {
     depthMax: number
 }
 
+/** Where the Area tab's observations sit, for the 3D view under its circle. */
+export interface ObsAreaMarker {
+    lon: number
+    lat: number
+    depth: number
+    color: string
+}
+
 /** One DFO IOS ship cast (CTD or rosette bottle), as `GET /casts` lists it. */
 export interface ShipCast {
     id: string
@@ -253,6 +261,11 @@ function createInitialState() {
         obsArea: null as ObsArea | null,
         obsAreaVariable: 'temperature',
         obsAreaDrawToken: 0,
+        // The loaded observations' positions (AreaPanel), drawn inside the
+        // circle's 3D cylinder; not shared in links.
+        obsAreaMarkers: [] as ObsAreaMarker[],
+        // Bumped by AreaPanel's 3D button, as gliderTiltToken.
+        obsAreaTiltToken: 0,
 
         // Which record the Analysis tab runs against. Was a whole separate tab
         // ("Sensor Analysis") until the two were merged behind one surface.
@@ -673,6 +686,14 @@ export const useMainStore = defineStore('main', {
 
         requestObsAreaRedraw() {
             this.obsAreaDrawToken++;
+        },
+
+        setObsAreaMarkers(markers: ObsAreaMarker[]) {
+            this.obsAreaMarkers = markers;
+        },
+
+        toggleObsAreaTilt() {
+            this.obsAreaTiltToken++;
         },
 
         setMapCenter(center: { lat: number, lng: number } | null) {

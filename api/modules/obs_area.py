@@ -35,6 +35,8 @@ MAX_POINTS = 20_000
 HOURLY_SPAN = timedelta(days=21)
 # Casts beyond this many keep the latest.
 MAX_CASTS = 5_000
+# Glider fixes per deployment returned for the Area tab's 3D view.
+GLIDER_SAMPLES = 400
 
 BINS = ("hour", "day", "week", "month", "year")
 # Week, month and year starts are Dates in ClickHouse; toDateTime keeps every
@@ -176,6 +178,26 @@ def _glider_rows(client, ids: list[str], base: dict, period: dict, diel: str, un
     return platforms, rows
 
 
+def _glider_samples(client, platforms: list[dict], base: dict, period: dict, diel: str) -> None:
+    """Give each glider platform `samples`: up to GLIDER_SAMPLES of its
+    (lon, lat, depth) fixes in the box, for plotting where it went."""
+    if not platforms:
+        return
+    period_where, period_params = _period_sql("time", period)
+    rows = client.query(
+        "SELECT deployment_id, groupArraySample({k:UInt32}, 1)((longitude, latitude, depth)) "
+        "FROM glider_profiles "
+        "WHERE deployment_id IN {g:Array(String)} AND variable = {v:String} AND NOT isNaN(value) "
+        f"AND depth BETWEEN {{d0:Float64}} AND {{d1:Float64}} AND {_circle_sql('latitude', 'longitude')} "
+        f"AND {period_where}{_diel_sql(diel, 'time', 'latitude', 'longitude')} "
+        "GROUP BY deployment_id",
+        parameters={**base, **period_params, "g": [p["id"] for p in platforms], "k": GLIDER_SAMPLES},
+    ).result_rows
+    found = {r[0]: r[1] for r in rows}
+    for p in platforms:
+        p["samples"] = [[round(float(lo), 5), round(float(la), 5), round(float(d), 1)] for lo, la, d in found.get(p["id"], [])]
+
+
 def _cast_points(client, base: dict, period: dict, diel: str):
     """(platforms, rows, truncated, total) for casts inside the circle: one
     row per cast, its values in the depth range averaged."""
@@ -254,6 +276,7 @@ def obs_area(variable: str, lat: float, lon: float, radius_km: float,
             if max(times) - min(times) <= HOURLY_SPAN:
                 unit = "hour"
                 (sp, sr), (gp, gr) = binned(unit)
+        _glider_samples(client, gp, base, period, diel)
         cp, cr, casts_truncated, casts_total = (_cast_points(client, base, period, diel)
                                                  if casts else ([], [], False, 0))
     finally:
