@@ -14,8 +14,12 @@ resolve_playwright_node_path() {
     return 0
   fi
 
-  local pw_pkg
-  pw_pkg=$(find "$HOME/.npm/_npx" -maxdepth 3 -type d -name playwright -path '*/node_modules/playwright' 2>/dev/null | head -1)
+  # Several npx caches can coexist; take one whose Chromium build is actually downloaded.
+  local pw_pkg="" cand rev
+  for cand in $(find "$HOME/.npm/_npx" -maxdepth 3 -type d -name playwright -path '*/node_modules/playwright' 2>/dev/null); do
+    rev=$(grep -A3 '"name": "chromium"' "$(dirname "$cand")/playwright-core/browsers.json" 2>/dev/null | grep -oE '"revision": "[0-9]+"' | grep -oE '[0-9]+')
+    if [ -n "$rev" ] && [ -d "$HOME/.cache/ms-playwright/chromium-$rev" ]; then pw_pkg=$cand; break; fi
+  done
   if [ -n "$pw_pkg" ]; then
     export NODE_PATH
     NODE_PATH="$(dirname "$pw_pkg")"
