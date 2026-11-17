@@ -38,6 +38,10 @@ git tags; the dates below are the last commit on each version branch.
   ~8× smaller).
 - **Climatology** — min/max are now the range of daily means across years, computed on the
   fly from the daily table.
+- **Model statistics are daily means** — Analysis Overview offers Min/Max only for sensor
+  series, and Comparison drops the model min/max lines and CSV columns;
+  `/analysis/timeseries` returns 400 for any other model statistic. Analysis variable
+  pickers and labels come from `variable_config.yml`, so the three new variables appear.
 - **Variable-aware value rounding** — `formatDisplayValue()` is now the single rounding
   answer for every tooltip, axis label and readout, derived from `variable_config.yml`
   precision in the currently displayed unit.

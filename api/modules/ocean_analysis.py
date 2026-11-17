@@ -13,6 +13,7 @@ import logging
 from typing import List, Tuple
 
 from modules.clickhouse_helpers import get_ch_client as _get_ch_client
+from shared.ssc_schema import SSC_VARIABLES
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +132,15 @@ def query_region_timeseries(
     applied here — the frontend derives climatology, trend, threshold
     counts, streaks, and extremes from this flat series.
 
+    SalishSeaCast_daily stores only daily means, so `stat` must be "mean".
+
     Returns: {"data": [{"time": "YYYY-MM-DD", "value": ...}, ...]}
     """
-    column_name = f"{variable}_{stat}"
+    if variable not in SSC_VARIABLES:
+        raise ValueError(f"Unknown variable: {variable}")
+    if stat != "mean":
+        raise ValueError(f"Unsupported statistic '{stat}': the model archive stores daily means only")
+    column_name = f"{variable}_mean"
 
     client = _get_ch_client()
 
