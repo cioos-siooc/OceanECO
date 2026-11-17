@@ -4,7 +4,8 @@ services:
   # images get pushed home via the `sync` stage ("process locally, network
   # only at the end").
   db-ch:
-    image: clickhouse/clickhouse-server:latest
+    # Pinned: the cloned data dir was written by this version.
+    image: clickhouse/clickhouse-server:26.5.1.882
     profiles: ["tools"]
     ports:
       - "8123:8123"

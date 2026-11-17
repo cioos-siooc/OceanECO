@@ -35,7 +35,16 @@ docker compose -f docker-compose.dev.yml exec db-ch clickhouse-client --query "S
 ```bash
 python -m SSC.cli {check|download|compute|image|ingest|sync|run|status} [--date YYYY-MM-DD] [--limit N] [--workers N]
 # check: [--init-days N]; download/image: [--variable VAR]; image: [--surface-only] (needs --date); run = all steps in order
-# ingest backfill (bypasses SalishSeaCast_status; needs --date): [--variables temperature,V,...] [--daily-only]; reads per-day NC, else the yearly {var}_{YYYY}.nc
+# ingest backfill (bypasses SalishSeaCast_status; needs --date): [--variables temperature,V,...] [--daily-only]; reads per-day NC, else
+#   the yearly {var}_{YYYY}.nc; replaces the date's rows (variables left out become NULL)
+# rebuild-daily --year YYYY [--init] [--workers N] [--stage all|read|repair|insert] [--days N]
+# rebuild-hourly --start D --end D [--workers N] [--init]
+#   Bulk loads from the NC archive on the external drives, dev only: docker-compose.archive.yml (project -p oa-archive, service
+#   `rebuild`, writes into the dev db-ch; dev stack up). rebuild-daily streams each yearly NC once into /scratch memmaps, then
+#   inserts; rebuild-hourly runs ingest_day per date. Resumable via rebuild_log / rebuild_hourly_log.
+#   Corrupt NC chunks ("NetCDF: HDF error") are logged in {var}.done; repair re-fetches them from the SSC ERDDAP,
+#   rewrites them in the NC file in place (drives mounted rw), re-reads those variables. pH/Ω aren't on ERDDAP, so a
+#   corrupt chunk there blocks the insert
 ```
 
 ## Architecture
@@ -45,7 +54,14 @@ python -m SSC.cli {check|download|compute|image|ingest|sync|run|status} [--date 
 **Storage** (`/opt/data/` in containers = `./data/` locally): `SalishSeaCast/nc/` raw NetCDF; `SalishSeaCast/images/` WebP tiles; `sensors/{id}/{sensorCategoryCode}.nc`; `cache/oa_grid_cache.npz` (grid, populated from `grid_SSC` on first use).
 
 ### ClickHouse (`db-ch`)
-The sole database. API access via `api/modules/clickhouse_helpers.py` (local `CH_HOST`/`CH_PORT`, or remote with `CH_USE_REMOTE=true` + `CH_REMOTE_URL`). Key tables: `grid_SSC` (`gridX`/`gridY`/`longitude`/`latitude`; nearest-neighbor lookups + tile rendering), `SalishSeaCast_hourly`/`SalishSeaCast_daily`, `SalishSeaCast_status` (pipeline state machine), `sensors`/`sensor_timeseries`. Variable metadata (precision, colormap bounds) lives in `shared/variable_config.yml` + `shared/colormaps.json`, not a table.
+The sole database. API access via `api/modules/clickhouse_helpers.py` (local `CH_HOST`/`CH_PORT`, or remote with `CH_USE_REMOTE=true` + `CH_REMOTE_URL`). Key tables: `grid_SSC` (`gridX`/`gridY`/`longitude`/`latitude`; nearest-neighbor lookups + tile rendering; the process machine's DB needs it too, for daily tiles), `SalishSeaCast_hourly`/`SalishSeaCast_daily`, `SalishSeaCast_status` (pipeline state machine, process machine only), `SalishSeaCast_sync_log`/`_daily_sync_log` (API machine), `sensors`/`sensor_timeseries` (no code creates the latter: DDL in `scripts/sensors_schema.sql`), `glider_*`, `ship_*`. Variable metadata (precision, colormap bounds) lives in `shared/variable_config.yml` + `shared/colormaps.json`, not a table. Dev `db-ch` is pinned to 26.5.1.882 and its data dir comes from `CH_DATA_DIR`/`CH_LOGS_DIR` in `.env.dev` (the rebuilt database; the old Float32 one is still in `./clickhouse/data`).
+
+**SSC model tables.** DDL lives only in `shared/ssc_schema.py` (used by `process/` and `api/`), for the 11 variables in `SSC_VARIABLES` (column order; `config.ALL_VARIABLES` is the same list).
+- Each variable is stored as `{var}_q` Nullable(Int32) = round(value / `precision`), decoded by ALIAS columns: `{var}` in `SalishSeaCast_hourly`, `{var}_mean` in `SalishSeaCast_daily`. Readers use the aliases; writers write `_q`. `SELECT *` skips aliases, so Native exports carry only `_q`.
+- Hourly: monthly partitions, `ORDER BY (gridX, gridY, depth, time)`. Daily: means only (no min/max), yearly partitions, `ORDER BY (gridX, gridY, time, depth)`, 2007 onward. Location-first sorting makes one cell's whole history ~0.5 s and a whole-map snapshot ~0.6 s.
+- `CREATE TABLE IF NOT EXISTS` never changes an existing table: a new variable also needs `ALTER TABLE … ADD COLUMN` (`_q` + alias) on both tables.
+- Hourly keeps 92 days (`SSC_HOURLY_RETENTION_DAYS`, API env): after each successful `/admin/syncHourly`, `sync_hourly.prune_hourly` drops monthly partitions lying wholly before the window and hourly tile folders (`{var}/{date}T*`) dated before it; `/variables` offers only hours in the window. Daily data and daily/monthly tiles are never pruned.
+- Each January, `OPTIMIZE TABLE SalishSeaCast_daily PARTITION <year> FINAL` is run by hand, after reviewing that year's data.
 
 ### API (`api/`)
 FastAPI app in `SERVER.py`. Blocking work runs in a `ProcessPoolExecutor` via `run_in_process()`, limited by `_extract_semaphore` (default 4). The API never reads NetCDF — all data comes from ClickHouse.
@@ -57,13 +73,13 @@ FastAPI app in `SERVER.py`. Blocking work runs in a `ProcessPoolExecutor` via `r
 | `POST /depthProfile` | `modules/extract_depth_profile.py` — time-depth (Hovmöller) grid for `depth/TimeDepthHeatmap.vue`, optionally with a variable-depth sensor's casts binned onto it. Returns `grid` (`lat`/`lon`/`distanceKm` of the answering cell) |
 | `POST /getMinMax` | `modules/extractMinMax.py` |
 | `POST /sensorTimeseries` | `modules/extractSensorTimeseries.py` |
-| `POST /extract_climateTimeseries` | `modules/extract_climate_timeseries.py` |
+| `POST /extract_climateTimeseries` | `modules/extract_climate_timeseries.py` — per day-of-year (or month) mean and min/max of the daily means across ≤2025 years, computed on the fly from `SalishSeaCast_daily` (no climatology table) |
 | `POST /analysis/timeseries` | `modules/ocean_analysis.py` |
 | `POST /crossSection` | `modules/extract_cross_section.py` — depth-vs-distance grid along a polyline (`vertices`, ≥2 `(lat, lon)`) at one time. Resamples by arc length, snaps via `shared/grid_lookup.py`'s cached KD-tree in one vectorized query, reads only distinct cells hit |
 | `GET /png/{source}/{var}/{dt}/{depth}` | Serves pre-rendered tiles; on a miss, `modules/extract_image.py` renders from ClickHouse (`shared/nc2tile.py`'s `render_tile_from_db`) and caches to the same path. `dt`'s shape selects bin mode: full timestamp = hourly, `YYYY-MM-DD` = daily, `YYYY-MM` = monthly. The "bottom" pseudo-depth isn't supported on the fallback path (404s) |
 | `GET /variables` | `modules/variables.py` |
 | `GET /health` | `SERVER.py` — 200 when ClickHouse answers `SELECT 1` within 5 s, else 503 `{status: "degraded"}`. Polled by `composables/useApiStatus.ts` (started in `app.vue`) for the header `status/ApiStatusIndicator.vue` and the outage/recovery `status/ApiStatusBanner.vue`; unreachable = "Server offline", 503 = "Database unavailable" |
-| `POST /admin/syncHourly`, `/admin/syncDaily` | `modules/sync_hourly.py` — bearer auth (`SYNC_API_TOKEN`); imports a date's Native-format export rsynced in by the remote pipeline into `SalishSeaCast_hourly`/`_daily` (logged in `SalishSeaCast_sync_log`) |
+| `POST /admin/syncHourly`, `/admin/syncDaily` | `modules/sync_hourly.py` — bearer auth (`SYNC_API_TOKEN`); imports a date's Native-format export rsynced in by the remote pipeline into `SalishSeaCast_hourly`/`_daily` (logged in `SalishSeaCast_sync_log`/`_daily_sync_log`; the hourly log is `/variables`' list of hourly times), then prunes hourly data past the retention window |
 
 **Out-of-domain coordinates.** Point lookups go through `extractTimeseries.py`'s `_find_nearest_grid_point`, which raises `OutsideDomainError` when no `grid_SSC` cell is within `MAX_GRID_DIST_KM` (25 km). `SERVER.py`'s `_outside_domain_response` returns a 400 with a plain-string `detail` (many frontend call sites print it) **and** a structured `error` (`code: "outside_model_domain"`, `distanceKm`, `maxDistanceKm`, `requested`, `nearest`). Wired into `/extractTimeseries`, `/depthProfile`, `/getProfile`, `/extract_climateTimeseries`; frontend reads it via `useDepthProfileFetch.ts`'s `asOutsideDomainError()`. The exception must pass every field through `super().__init__` to survive `ProcessPoolExecutor` pickling. `ocean_analysis.py`'s `lookup_nearest_grid_cell` (used by `/analysis/timeseries`) is a **separate, unguarded** lookup.
 
@@ -73,10 +89,11 @@ Entry: `process/SSC/cli.py`. Each file/day-variable is a row in `SalishSeaCast_s
 pending_download → downloading → success_download → pending_compute → computing → success_compute
   → pending_image → imaging → success_image → pending_ingest → success_ingest → pending_sync → success_sync
 ```
-- `SSC/downloader.py` — ERDDAP fetching with backfill
-- `SSC/compute.py` — derived variables (pH, Ω aragonite) via PyCO2SYS
-- `SSC/imaging.py` — WebP tiles via `nc2tile.py`
-- `SSC/sync.py` — exports a date's rows to Native format, rsyncs them + images to the API machine (`cloudflared access ssh` ProxyCommand), then calls `POST /admin/syncHourly`
+- `SSC/downloader.py` — ERDDAP fetching with backfill: 8 variables from the physics, chemistry and biology (nitrate, diatoms, flagellates) datasets
+- `SSC/compute.py` — derived variables (pH, Ω aragonite/calcite) via PyCO2SYS
+- `SSC/imaging.py` — hourly WebP tiles from NC via `nc2tile.py`; `image_daily_surface` renders `{var}/{date}/0.5.webp` from the date's daily rows
+- `SSC/ingest.py` — one date's NC → `_q` rows in both tables, then the daily surface tiles. Reads 6 hours at a time and inserts Native blocks built from numpy (clickhouse-connect's `insert_df` boxes nullable ints: ~19 GB a day). Replaces the date's existing rows, so reruns are safe. ~90 s, ~5 GB a day
+- `SSC/sync.py` — streams a date's rows to Native files, rsyncs them + the date's image dirs (hourly and daily) to the API machine (`cloudflared access ssh` ProxyCommand), then calls `POST /admin/syncHourly` and `/admin/syncDaily`
 
 `run` = `check → download → check_image → compute → check_image → image → promote → ingest → promote → sync`, defined once in `cli.pipeline_steps()`. Step helpers raise `cli.PipelineError` (not `sys.exit`) so they can run inside Prefect tasks.
 

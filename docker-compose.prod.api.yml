@@ -111,7 +111,8 @@ services:
   # extractTimeseries/analysis queries. Not the same as the PROCESS
   # machine's own db-ch, which only tracks that machine's pipeline status.
   db-ch:
-    image: clickhouse/clickhouse-server:latest
+    # Pinned: the cloned data dir was written by this version.
+    image: clickhouse/clickhouse-server:26.5.1.882
     ports:
       - "8123:8123"
       - "9000:9000"

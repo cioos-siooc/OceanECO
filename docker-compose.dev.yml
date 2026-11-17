@@ -53,13 +53,16 @@ services:
     restart: unless-stopped
 
   db-ch:
-    image: clickhouse/clickhouse-server:latest
+    # Pinned: the data dir was written by this version; don't let `latest` move it.
+    image: clickhouse/clickhouse-server:26.5.1.882
     ports:
       - "9013:8123"
       - "9014:9000"
     volumes:
-      - ./clickhouse/data:/var/lib/clickhouse
-      - ./clickhouse/logs:/var/log/clickhouse-server
+      # CH_DATA_DIR / CH_LOGS_DIR in .env.dev (e.g. the rebuilt `_q` database
+      # in /home/taimaz/clickhouse-archive); defaults keep the old in-repo dirs.
+      - ${CH_DATA_DIR:-./clickhouse/data}:/var/lib/clickhouse
+      - ${CH_LOGS_DIR:-./clickhouse/logs}:/var/log/clickhouse-server
       - ./clickhouse/users.d:/etc/clickhouse-server/users.d
     environment:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
@@ -98,6 +101,8 @@ services:
     env_file:
       - .env.dev
     environment:
+      - CH_HOST=db-ch
+      - CH_PORT=8123
       - SSC_NC_DIR=${SSC_NC_DIR:-/opt/data/SSC/nc}
       - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
     volumes:

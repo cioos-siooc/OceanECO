@@ -12,6 +12,7 @@ from typing import Dict, List
 from shared.variable_config import load_variable_config
 
 from modules.clickhouse_helpers import get_ch_client
+from modules.sync_hourly import HOURLY_RETENTION_DAYS
 from modules.sync_hourly import ensure_schema as _ensure_sync_schema
 
 
@@ -29,7 +30,11 @@ def _get_ssc_variables() -> List[Dict]:
     stronger signal than PROCESS's own pipeline-progress bookkeeping on a
     different machine.
 
-    All 8 SalishSeaCast variables move through the pipeline as a bundle (see
+    Limited to the hourly retention window (HOURLY_RETENTION_DAYS back from
+    the newest synced date), the hours prune_hourly keeps; older dates are
+    served as daily/monthly means.
+
+    All SalishSeaCast variables move through the pipeline as a bundle (see
     process/SSC/cli.py's check_image/promote semantics), so they all share
     the exact same available-datetimes list — computed once here, not per
     variable.
@@ -47,6 +52,9 @@ def _get_ssc_variables() -> List[Dict]:
         success_dates = [row[0] for row in result.result_rows]
     finally:
         client.close()
+    if success_dates and HOURLY_RETENTION_DAYS > 0:
+        first_kept = success_dates[-1] - datetime.timedelta(days=HOURLY_RETENTION_DAYS - 1)
+        success_dates = [d for d in success_dates if d >= first_kept]
 
     dts = sorted(
         datetime.datetime.combine(d, datetime.time(0, 30)) + datetime.timedelta(hours=h)

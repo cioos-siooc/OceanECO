@@ -1,0 +1,61 @@
+# Rebuild tools for the SalishSeaCast `_q` tables (SSC/rebuild_daily.py,
+# SSC/rebuild_hourly.py): reads the hourly NetCDF archive on the external
+# drives and writes into the dev stack's db-ch (docker-compose.dev.yml), whose
+# data dir (CH_DATA_DIR) is the database these tools built. Dev-only; run as
+# its own compose project so it never recreates the main stack, with the dev
+# stack up:
+#
+#   docker compose -f docker-compose.archive.yml --env-file .env.dev -p oa-archive run --rm rebuild \
+#     uv run python -m SSC.cli rebuild-daily --year 2007 --workers 6
+#
+# Override any path below from .env.dev.
+
+services:
+  # One-shot worker: reads hourly NetCDF from the two drives and writes
+  # into db-ch. `run --rm` only.
+  rebuild:
+    build:
+      context: .
+      dockerfile: process/Dockerfile
+    profiles: ["tools"]
+    user: "${UID:-1000}:${GID:-1000}"
+    # `touch {scratch}/HOLD_YYYY` makes a `--year YYYY` run wait (e.g. while
+    # that year's NC files are still downloading); remove it to release.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        y=; prev=; for a in "$$@"; do [ "$$prev" = --year ] && y=$$a; prev=$$a; done
+        if [ -n "$$y" ] && [ -e "/scratch/HOLD_$$y" ]; then
+          echo "held: /scratch/HOLD_$$y exists, waiting"
+          while [ -e "/scratch/HOLD_$$y" ]; do sleep 300; done
+          echo "released"
+        fi
+        exec "$$@"
+      - hold
+    env_file:
+      - .env.dev
+    environment:
+      CH_HOST: db-ch
+      CH_PORT: "8123"
+      CH_USE_REMOTE: "false"
+      # Searched in order per variable; see SSC/rebuild_daily.py find_sources().
+      SSC_NC_DIRS: /nc/a:/nc/b
+      # Per-year staging memmaps (~35 GB/year), removed after a full insert.
+      REBUILD_SCRATCH_DIR: /scratch
+    volumes:
+      # Source dirs only, so the image's /app/.venv stays visible.
+      - ./process/SSC:/app/SSC
+      - ./shared:/app/shared
+      - ${REBUILD_SCRATCH_HOST_DIR:-/home/taimaz/clickhouse-archive/scratch}:/scratch
+      # Read-write only so the repair stage can rewrite corrupt chunks in
+      # place (re-fetched from ERDDAP); nothing else writes here.
+      - ${SSC_NC_DIR_A:-/run/media/taimaz/tiles/SalishSeaCast}:/nc/a
+      - ${SSC_NC_DIR_B:-/run/media/taimaz/8e1ab8f6-7b7a-4c78-aa40-84615ca9d539/SalishSeaCast}:/nc/b
+    networks: [dev]
+
+networks:
+  dev:
+    # The dev stack's network (docker-compose.dev.yml), so db-ch resolves.
+    name: ocean-acidification-dashboard_default
+    external: true

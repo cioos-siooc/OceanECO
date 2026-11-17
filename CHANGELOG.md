@@ -18,8 +18,24 @@ git tags; the dates below are the last commit on each version branch.
 - **DFO MEDS buoy catalog** (`sensors/catalog_dfo_meds.yml`) and extra ERDDAP fetch
   constraints for more reliable sensor ingestion.
 - Disabled states and explanatory tooltips across controls that require a prior selection.
+- **Nitrate, diatoms and flagellates** — downloaded, stored and served alongside the other
+  eight SalishSeaCast variables (ERDDAP biology dataset), back to 2007.
+- **Daily surface tiles** — the pipeline renders each date's 0.5 m daily-mean tile per
+  variable after ingest and syncs it with the hourly ones.
+- **Hourly retention** — the API keeps 92 days of hourly rows and tiles
+  (`SSC_HOURLY_RETENTION_DAYS`), pruning after each successful hourly sync; `/variables`
+  offers only those hours. Daily data is kept.
 
 ### Changed
+- **Integer model storage** — `SalishSeaCast_hourly`/`_daily` store each variable as
+  `{var}_q` Int32 = round(value / precision) with decoding ALIAS columns, so readers are
+  unchanged. Daily keeps means only, partitioned by year; 2007–2026 rebuilt from the NC
+  archive in ~200 GB. One DDL for process and
+  API in `shared/ssc_schema.py`.
+- **Ingest rewritten** — block reads and Native inserts (~90 s, ~5 GB a day); rerunning a
+  date replaces its rows instead of duplicating them. Sync exports stream to disk.
+- **Climatology** — min/max are now the range of daily means across years, computed on the
+  fly from the daily table.
 - **Variable-aware value rounding** — `formatDisplayValue()` is now the single rounding
   answer for every tooltip, axis label and readout, derived from `variable_config.yml`
   precision in the currently displayed unit.

@@ -5,6 +5,7 @@ from variables import _get_ssc_variables
 _SSC_VARS = {
     'temperature', 'salinity', 'total_alkalinity', 'dissolved_oxygen',
     'dissolved_inorganic_carbon', 'ph_total', 'omega_arag', 'omega_cal',
+    'nitrate', 'diatoms', 'flagellates',
 }
 
 
@@ -54,7 +55,7 @@ def test_get_ssc_variables_expands_24_hourly_dts(monkeypatch):
     assert temp['depths'][-1] == 441.5  # deepest native sigma level
     assert temp['bounds'][0] < temp['bounds'][2]  # min_lon < max_lon
 
-    # All 8 variables share the exact same dts/depths/bounds, since they move
+    # All variables share the exact same dts/depths/bounds, since they move
     # through the pipeline as a bundle (see _get_ssc_variables docstring).
     for v in variables:
         assert v['dts'] == temp['dts']
@@ -67,5 +68,16 @@ def test_get_ssc_variables_no_synced_dates(monkeypatch):
     monkeypatch.setattr('variables.get_ch_client', lambda: fake)
 
     variables = _get_ssc_variables()
-    assert len(variables) == 8
+    assert len(variables) == 11
     assert all(v['dts'] == [] for v in variables)
+
+
+def test_get_ssc_variables_limits_dts_to_retention_window(monkeypatch):
+    # newest 2026-12-01, 92 days -> first date offered 2026-09-01
+    fake = FakeChClient(sync_dates=[date(2026, 8, 30), date(2026, 8, 31), date(2026, 9, 1), date(2026, 12, 1)])
+    monkeypatch.setattr('variables.get_ch_client', lambda: fake)
+    monkeypatch.setattr('variables.HOURLY_RETENTION_DAYS', 92)
+
+    temp = next(v for v in _get_ssc_variables() if v['var'] == 'temperature')
+    assert len(temp['dts']) == 48
+    assert temp['dts'][0] == datetime(2026, 9, 1, 0, 30)
