@@ -13,9 +13,13 @@
       <SegmentedControl v-model="selectedSeason" :items="seasonItems" size="xs" block
         item-class="px-1 min-w-0" class="mb-3" aria-label="Season" />
 
-      <div class="ctrl-label">Statistic</div>
-      <SegmentedControl v-model="primaryStat" :items="statItems" size="sm" block variant="outline"
-        class="mb-3" aria-label="Statistic" />
+      <!-- Sensors are aggregated to daily min/mean/max client-side; the model
+           archive (SalishSeaCast_daily) stores daily means only. -->
+      <template v-if="isSensor">
+        <div class="ctrl-label">Statistic</div>
+        <SegmentedControl v-model="primaryStat" :items="statItems" size="sm" block variant="outline"
+          class="mb-3" aria-label="Statistic" />
+      </template>
 
       <div class="grow" />
     </div>
@@ -100,7 +104,7 @@ import { fetchSensorAnalysisSeries } from '~~/composables/useSensorAnalysisFetch
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import {
 
-  availableVariables, filterBySeason, groupByYear, breakDataGaps, yearColor, computeYearBandStats,
+  filterBySeason, groupByYear, breakDataGaps, yearColor, computeYearBandStats,
 } from '~~/composables/useAnalysisStatistics'
 import { csvMeta, useCsvExport, type CsvDataset, type CsvMetaEntry } from '~~/composables/useCsvExport'
 import { useViewState, useChartZoom } from '~~/composables/useViewState'
@@ -113,7 +117,7 @@ const analysisSource = computed(() => props.source ?? 'model')
 const isSensor = computed(() => analysisSource.value === 'sensor')
 
 const mainStore = useMainStore()
-const { displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue, variableLabel } = useVariableRegistry()
 
 // ── SENSOR CONTEXT (unused in model mode) ────────────────────────────────────
 const selectedSensor = computed(() => mainStore.selectedSensor)
@@ -156,6 +160,8 @@ const zoom = useChartZoom(VIEW_SCOPE)
 
 const selectedSeason = field('selectedSeason', 'full_year')
 const primaryStat = field('primaryStat', 'mean')
+// What is actually plotted: the model only has daily means.
+const stat = computed(() => (isSensor.value ? primaryStat.value : 'mean') as 'min' | 'mean' | 'max')
 
 const isGenerating = ref(false)
 const hasActivePlot = ref(false)
@@ -186,7 +192,7 @@ const polygonFromClick = computed<[number, number][]>(() => {
 })
 
 const varName = computed(() =>
-  availableVariables.find(v => v.id === variable.value)?.name || variable.value || 'Variable'
+  variable.value ? variableLabel(variable.value) : 'Variable'
 )
 const varUnit = computed(() => variable.value ? displayUnit(variable.value) : '')
 
@@ -208,7 +214,7 @@ const seasonLabel = computed(() => {
 const chartTitle = computed(() => {
   // A profiler's depth is not implied by the sensor, so name it.
   const depthSuffix = isSensor.value && isVariableDepth.value && depth.value != null ? ` @ ${depth.value}m` : ''
-  return `Historical Range — ${varName.value}${depthSuffix} (${primaryStat.value.toUpperCase()})`
+  return `Historical Range — ${varName.value}${depthSuffix} (${stat.value.toUpperCase()})`
 })
 
 const extremeRecords = computed(() => {
@@ -294,7 +300,7 @@ if (csv) csv.register((): CsvDataset[] => {
   const u = varUnit.value || null
   const meta = csvMeta(csv.context.value, [
     ['season', seasonLabel.value],
-    ['statistic', primaryStat.value],
+    ['statistic', stat.value],
     ['time_range', `${minYear.value}-01-01 .. ${maxYear.value}-12-31`],
     // Not a location line — the coordinates are already their own rows; this
     // says whether the series is one grid cell or an area mean.
@@ -480,7 +486,7 @@ function renderOverlayChart(series: { year: number; data: SeriesPoint[] }[]) {
     },
     yAxis: {
       type: 'value',
-      name: `${varName.value} (${primaryStat.value})${varUnit.value ? ` [${varUnit.value}]` : ''}`,
+      name: `${varName.value} (${stat.value})${varUnit.value ? ` [${varUnit.value}]` : ''}`,
       nameLocation: 'middle', nameGap: 50, axisLabel: { fontSize: 10, color: '#ccc' }, scale: true,
     },
     dataZoom: [{ type: 'inside', ...zoom.current() }, { type: 'slider', bottom: 4, height: 16, ...zoom.current() }],
@@ -511,7 +517,7 @@ watch(selectedSeason, () => {
 // mainStore.unitPreference is included so toggling the display unit re-fetches
 // (a cheap cache hit — see useAnalysisFetch.ts/useSensorAnalysisFetch.ts)
 // rather than the chart showing stale numbers under the old unit.
-watch([lastClicked, variable, depth, queryMode, primaryStat, analysisSource, selectedSensor, () => mainStore.unitPreference[variable.value]], scheduleAutoRun)
+watch([lastClicked, variable, depth, queryMode, stat, analysisSource, selectedSensor, () => mainStore.unitPreference[variable.value]], scheduleAutoRun)
 
 // Switching into this tab fetches fresh data for whatever changed while it was hidden.
 // immediate: true also covers first mount — the dialog only creates this component once
@@ -551,7 +557,7 @@ async function fetchRegionTimeseries(): Promise<SeriesPoint[]> {
     const from = `${minYear.value}-01-01T000000`
     const to = `${maxYear.value}-12-31T235959`
     return fetchSensorAnalysisSeries(
-      sensorInfo.value.id, variable.value, primaryStat.value as 'min' | 'mean' | 'max', depth.value, from, to,
+      sensorInfo.value.id, variable.value, stat.value, depth.value, from, to,
       isVariableDepth.value ? mainStore.selected_variable.source : null,
     )
   }
@@ -565,7 +571,7 @@ async function fetchRegionTimeseries(): Promise<SeriesPoint[]> {
   // cancellation — fetchAnalysisSeries's cache can be shared across callers,
   // so aborting it here would cancel other callers waiting on the same request.
   return fetchAnalysisSeries(
-    { variable: variable.value, stat: primaryStat.value as 'min' | 'mean' | 'max', depth: depth.value, location, yearRange: [minYear.value, maxYear.value] },
+    { variable: variable.value, depth: depth.value, location, yearRange: [minYear.value, maxYear.value] },
   )
 }
 
@@ -573,7 +579,7 @@ async function fetchRegionTimeseries(): Promise<SeriesPoint[]> {
 // Identifies the inputs that should trigger an automatic refetch.
 function currentSignature(): string {
   const pt = lastClicked.value
-  return JSON.stringify({ source: analysisSource.value, sensorId: selectedSensor.value?.id, lat: pt?.lat, lng: pt?.lng, mode: queryMode.value, variable: variable.value, depth: depth.value, stat: primaryStat.value })
+  return JSON.stringify({ source: analysisSource.value, sensorId: selectedSensor.value?.id, lat: pt?.lat, lng: pt?.lng, mode: queryMode.value, variable: variable.value, depth: depth.value, stat: stat.value })
 }
 
 function scheduleAutoRun() {

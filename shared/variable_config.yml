@@ -164,3 +164,26 @@ variables:
     colormapMin: 0.0001
     colormapMax: 6.5
     precision: 0.0001
+  # Biogeochemistry (SSC ERDDAP hindcast). colormapMin/Max are first guesses —
+  # tune once data is ingested.
+  nitrate:
+    name: "Nitrate"
+    unit: "mmol/m³"
+    colormap: matter
+    colormapMin: 0.01
+    colormapMax: 35
+    precision: 0.01
+  diatoms:
+    name: "Diatoms"
+    unit: "mmol N/m³"
+    colormap: algae
+    colormapMin: 0.001
+    colormapMax: 10
+    precision: 0.001
+  flagellates:
+    name: "Flagellates"
+    unit: "mmol N/m³"
+    colormap: algae
+    colormapMin: 0.001
+    colormapMax: 5
+    precision: 0.001

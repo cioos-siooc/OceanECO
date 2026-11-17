@@ -3,10 +3,16 @@
 Climatology timeseries extraction from ClickHouse SalishSeaCast_daily.
 
 For a given lat/lon/variable/depth and a date window, aggregates all available
-historical years to produce climatological mean, min, and max — one entry per
+historical years (through 2025) to produce a climatological mean, min, and
+max of the daily means — one entry per
 calendar day (day-of-year grouping) or per calendar month (month-of-year
 grouping, for `bin_mode='monthly'`) in the window, mapped back onto the
 requested dates.
+
+Computed on the fly: SalishSeaCast_daily is sorted by (gridX, gridY, time,
+depth), so one cell's ~7,000 days read in well under a second. It stores daily
+means only, so min/max are the range of the daily means across years, not of
+the hourly values.
 """
 import math
 import logging
@@ -26,8 +32,8 @@ def _clean(v):
 
 def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bin_mode='daily'):
     """
-    Returns [{requested_date, mean, min, max}, ...] with climatological stats
-    aggregated across all available years in SalishSeaCast_daily.
+    Returns [{requested_date, mean, min, max}, ...]: the mean and range of the
+    daily means across the years in SalishSeaCast_daily (through 2025).
 
     For `bin_mode='daily'`/`'hourly'`, one entry per calendar day in
     [from_date, to_date], grouped by day-of-year — a single annual cycle,
@@ -52,15 +58,19 @@ def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bi
     # SERVER.py renders as the same structured 400 every other endpoint sends.
     grid_x, grid_y, _, _, _ = _find_nearest_grid_point(client, "grid_SSC", lat, lon)
 
-    # Resolve nearest available depth
+    # Resolve nearest available depth at this cell (-1 = its deepest level).
+    # Filtered by cell so it reads one cell's rows, not the whole table.
+    cell = f"gridX = {grid_x} AND gridY = {grid_y}"
     depth_float = float(depth)
     if depth_float == -1.0:
-        r = client.query("SELECT max(depth) FROM SalishSeaCast_daily")
+        r = client.query(f"SELECT max(depth) FROM SalishSeaCast_daily WHERE {cell}")
+        if not r.result_rows or r.result_rows[0][0] is None:
+            return []
         depth_sel = float(r.result_rows[0][0])
     else:
         r = client.query(
             f"SELECT depth FROM SalishSeaCast_daily "
-            f"WHERE abs(depth - {depth_float}) < 0.1 LIMIT 1"
+            f"WHERE {cell} AND abs(depth - {depth_float}) < 0.1 LIMIT 1"
         )
         if not r.result_rows:
             logger.warning("No depth near %s found in SalishSeaCast_daily", depth_float)
@@ -68,8 +78,6 @@ def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bi
         depth_sel = float(r.result_rows[0][0])
 
     col_mean = f"{variable}_mean"
-    col_min  = f"{variable}_min"
-    col_max  = f"{variable}_max"
 
     start_dt = pd.to_datetime(from_date).normalize()
     end_dt = pd.to_datetime(to_date).normalize()
@@ -90,8 +98,8 @@ def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bi
             SELECT
                 toMonth(time) AS mo,
                 avg({col_mean}),
-                min({col_min}),
-                max({col_max})
+                min({col_mean}),
+                max({col_mean})
             FROM SalishSeaCast_daily
             WHERE gridX = {grid_x}
               AND gridY = {grid_y}
@@ -140,8 +148,8 @@ def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bi
             toMonth(time)      AS mo,
             toDayOfMonth(time) AS dy,
             avg({col_mean}),
-            min({col_min}),
-            max({col_max})
+            min({col_mean}),
+            max({col_mean})
         FROM SalishSeaCast_daily
         WHERE gridX = {grid_x}
           AND gridY = {grid_y}

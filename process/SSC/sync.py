@@ -9,7 +9,7 @@ machine. Once a date finishes ingest, this stage:
      API machine.
   3. Calls the API machine to import the export file into its own ClickHouse.
   4. Repeats 1-3 for that date's SalishSeaCast_daily row(s) — the per-cell
-     mean/min/max ingest.py derived from the same hourly NC read — against
+     daily means ingest.py derived from the same hourly NC read — against
      a separate native file and POST /admin/syncDaily.
 
 Idempotency: the API machine maintains its own sync log and is the source of
@@ -138,16 +138,24 @@ def _export_native(client, date_val: date, out_path: str) -> int:
         'SELECT count() FROM SalishSeaCast_hourly WHERE time >= %(start)s AND time < %(end)s',
         parameters=params,
     ).result_rows[0][0]
-    data = client.raw_query(
-        'SELECT * FROM SalishSeaCast_hourly WHERE time >= %(start)s AND time < %(end)s',
-        parameters=params,
-        fmt='Native',
-    )
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, 'wb') as f:
-        f.write(data)
-    logger.info('Exported %s (%d bytes, %d rows) for %s', out_path, len(data), row_count, date_val)
+    n_bytes = _stream_native(
+        client, 'SELECT * FROM SalishSeaCast_hourly WHERE time >= %(start)s AND time < %(end)s',
+        params, out_path)
+    logger.info('Exported %s (%d bytes, %d rows) for %s', out_path, n_bytes, row_count, date_val)
     return row_count
+
+
+def _stream_native(client, sql: str, params: dict, out_path: str) -> int:
+    """Write the query's Native-format result to out_path without holding it
+    in memory (a day of hourly rows is several GB). SELECT * leaves out the
+    ALIAS columns, so only the stored `_q` columns go out. Returns bytes written."""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    n = 0
+    with client.raw_stream(sql, parameters=params, fmt='Native') as src, open(out_path, 'wb') as f:
+        for chunk in iter(lambda: src.read(16 * 1024 * 1024), b''):
+            f.write(chunk)
+            n += len(chunk)
+    return n
 
 
 def _daily_native_path(date_val: date) -> str:
@@ -155,8 +163,8 @@ def _daily_native_path(date_val: date) -> str:
 
 
 def _export_native_daily(client, date_val: date, out_path: str) -> int:
-    """Export this date's SalishSeaCast_daily row(s) — written by ingest.py's
-    per-cell mean/min/max accumulation, one row set per date (time is a Date
+    """Export this date's SalishSeaCast_daily row(s) — ingest.py's per-cell
+    daily means, one row set per date (time is a Date
     column there, not DateTime), so an equality match is enough. Returns the
     row count, same purpose as _export_native's."""
     params = {'d': date_val}
@@ -164,15 +172,9 @@ def _export_native_daily(client, date_val: date, out_path: str) -> int:
         'SELECT count() FROM SalishSeaCast_daily WHERE time = %(d)s',
         parameters=params,
     ).result_rows[0][0]
-    data = client.raw_query(
-        'SELECT * FROM SalishSeaCast_daily WHERE time = %(d)s',
-        parameters=params,
-        fmt='Native',
-    )
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, 'wb') as f:
-        f.write(data)
-    logger.info('Exported %s (%d bytes, %d rows) for %s', out_path, len(data), row_count, date_val)
+    n_bytes = _stream_native(client, 'SELECT * FROM SalishSeaCast_daily WHERE time = %(d)s',
+                             params, out_path)
+    logger.info('Exported %s (%d bytes, %d rows) for %s', out_path, n_bytes, row_count, date_val)
     return row_count
 
 
@@ -195,15 +197,17 @@ def _rsync_native_file(local_path: str) -> None:
 
 
 def _date_image_dirs(date_val: date, image_base_dir: str) -> list[str]:
-    """Relative paths (under image_base_dir) of every per-hour image dir for date_val."""
-    pattern = date_val.strftime('%Y-%m-%d') + 'T*'
+    """Relative paths (under image_base_dir) of date_val's image dirs: the
+    per-hour ones ({date}T*) and the daily one ({date}, surface tiles)."""
+    day = date_val.strftime('%Y-%m-%d')
     dirs = []
     for var in ALL_VARIABLES:
         var_dir = os.path.join(image_base_dir, var)
         if not os.path.isdir(var_dir):
             continue
         for name in sorted(os.listdir(var_dir)):
-            if fnmatch.fnmatch(name, pattern) and os.path.isdir(os.path.join(var_dir, name)):
+            if ((name == day or fnmatch.fnmatch(name, day + 'T*'))
+                    and os.path.isdir(os.path.join(var_dir, name))):
                 dirs.append(os.path.join(var, name))
     return dirs
 

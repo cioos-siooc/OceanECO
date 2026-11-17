@@ -44,7 +44,7 @@ import * as echarts from 'echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import type { SeriesPoint, AnalysisLocation } from '~~/composables/useAnalysisFetch'
-import { availableVariables, filterBySeason, pearsonCorrelation, joinSeriesByDate, linearRegression } from '~~/composables/useAnalysisStatistics'
+import { filterBySeason, pearsonCorrelation, joinSeriesByDate, linearRegression } from '~~/composables/useAnalysisStatistics'
 import { csvMeta, useCsvExport, type CsvDataset } from '~~/composables/useCsvExport'
 import { useViewState } from '~~/composables/useViewState'
 
@@ -58,11 +58,10 @@ const props = defineProps<{
   fetchSeries: (variableId: string, depth: number, location: AnalysisLocation) => Promise<SeriesPoint[]>
 }>()
 
-function varName(id: string) { return availableVariables.find(v => v.id === id)?.name || id }
-const { displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue, variableLabel: varName, modelVariables } = useVariableRegistry()
 function axisName(id: string) { const u = displayUnit(id); return u ? `${varName(id)} (${u})` : varName(id) }
 
-const selectableVariables = availableVariables
+const selectableVariables = modelVariables
 const MAX_VARS = 4
 // Store-backed so a shared link restores the chosen variables and the picked
 // matrix cell rather than reopening on the empty scatter placeholder.

@@ -1,179 +1,275 @@
 """ClickHouse ingestion step for the SalishSeaCast pipeline.
 
-Reads all 8 NetCDF files for a given date, flattens the 4D arrays into rows,
-filters out NaN / land cells, and inserts into SalishSeaCast_hourly in batches.
+One date's hourly NetCDF (one file per variable) -> SalishSeaCast_hourly and
+SalishSeaCast_daily, both storing `{var}_q` = round(value / precision)
+(schema in shared/ssc_schema.py).
 
-Picks up dates where all 8 variables are at pending_ingest (set by
-db.promote_ready_dates() after all images complete).
+Rows: the cells where temperature is valid that hour (not NaN, not the 0.0
+seafloor padding); every other variable is sampled at those rows, NaN -> NULL.
+A cell's daily row is the mean of its hourly values (cells with at least one
+valid hour); a variable's mean skips its NaN hours.
+
+Read BLOCK_HOURS at a time per variable and inserted in ClickHouse Native
+format built straight from numpy (clickhouse-connect's insert_df boxes nullable
+ints into Python objects, ~19 GB for one day): peak ~5 GB, ~90 s a day.
+
+Rerunnable: the date's existing rows are deleted before it's written.
+
+Picks up dates where all variables are at pending_ingest (set by
+db.promote_ready_dates() after all images complete), and renders each date's
+daily surface tiles from the rows just written (imaging.image_daily_surface).
 """
 from __future__ import annotations
 
 import logging
 import os
-from datetime import date
+from datetime import date, timedelta
 
+import netCDF4
 import numpy as np
 import pandas as pd
-import xarray as xr
+
+from shared.ssc_schema import DAILY_TABLE, HOURLY_TABLE, precision
 
 from .config import (
     ALL_VARIABLES, NC_BASE_DIR,
     STATUS_FAILED_INGEST, STATUS_INGESTING, STATUS_SUCCESS_INGEST,
 )
 from .db import get_dates_pending_ingest, get_row, mark_failed, mark_running, mark_success
+from .imaging import image_daily_surface
 
 logger = logging.getLogger('SalishSeaCast.ingest')
 
-_BATCH_SIZE = 500_000
+BLOCK_HOURS = 6   # hours read per variable at a time (pH/Ω files are chunked 6 h deep)
 
 
-def _nc_path(variable: str, date_val: date, nc_base_dir: str) -> str:
-    return os.path.join(nc_base_dir, variable, f'{variable}_{date_val.strftime("%Y%m%d")}.nc')
+# ---------------------------------------------------------------------------
+# NetCDF
+# ---------------------------------------------------------------------------
+
+def find_nc(variable: str, date_val: date, nc_dirs: list[str]) -> str | None:
+    """First of, in each root: {var}/{var}_{YYYYMMDD}.nc, {var}/{YYYY}/{var}_{YYYYMMDD}.nc,
+    {var}/{var}_{YYYY}.nc (a yearly file of hourly fields)."""
+    ymd = date_val.strftime('%Y%m%d')
+    for root in nc_dirs:
+        for p in (os.path.join(root, variable, f'{variable}_{ymd}.nc'),
+                  os.path.join(root, variable, str(date_val.year), f'{variable}_{ymd}.nc'),
+                  os.path.join(root, variable, f'{variable}_{date_val.year}.nc')):
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+class _DayFile:
+    """One variable's time steps on one date. Yearly files aren't always
+    monotonic (omega_arag_2012.nc repeats 2012-09-25 after Dec 31): the first
+    occurrence of each timestamp is kept."""
+
+    def __init__(self, variable: str, date_val: date, path: str):
+        self.path = path
+        self.ds = netCDF4.Dataset(path)
+        try:
+            tv = self.ds.variables[next(d for d in self.ds.dimensions if 'time' in d.lower())]
+            times = pd.DatetimeIndex(netCDF4.num2date(
+                tv[:], tv.units, getattr(tv, 'calendar', 'standard'),
+                only_use_cftime_datetimes=False, only_use_python_datetimes=True))
+            on_day = times.normalize() == pd.Timestamp(date_val)
+            dup = on_day & times.duplicated(keep='first')
+            if dup.any():
+                logger.warning('%s: dropped %d repeated time steps on %s (kept the first)',
+                               path, int(dup.sum()), date_val)
+            self.idx = np.flatnonzero(on_day & ~dup)
+            if not len(self.idx):
+                raise FileNotFoundError(f'{path} has no time steps on {date_val}')
+            self.times = times[self.idx].values.astype('datetime64[s]')
+            self.var = self.ds.variables[variable]
+            self.var.set_auto_maskandscale(True)
+            if self.var.dimensions[1:] != ('depth', 'gridY', 'gridX'):
+                raise RuntimeError(f'{path}: unexpected dims {self.var.dimensions}')
+        except Exception:
+            self.ds.close()
+            raise
+
+    def read(self, sel: slice) -> np.ndarray:
+        """Hours [sel] of the day as (n_hours, depth * gridY * gridX) float32, fill -> NaN."""
+        ix = self.idx[sel]
+        t = slice(int(ix[0]), int(ix[-1]) + 1) if np.all(np.diff(ix) == 1) else ix
+        arr = np.ma.filled(self.var[t], np.nan).astype(np.float32, copy=False)
+        arr[np.abs(arr) >= 1e19] = np.nan
+        return arr.reshape(len(ix), -1)
+
+
+# ---------------------------------------------------------------------------
+# ClickHouse Native format
+# ---------------------------------------------------------------------------
+
+def _varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b, n = n & 0x7F, n >> 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _native_block(n_rows: int, cols: list[tuple[str, str, list[np.ndarray]]]) -> bytes:
+    """One Native-format block from little-endian numpy columns: (name, type,
+    parts), a Nullable column's parts being [null map as uint8, values]."""
+    buf = [_varint(len(cols)), _varint(n_rows)]
+    for name, typ, parts in cols:
+        for txt in (name, typ):
+            enc = txt.encode()
+            buf += [_varint(len(enc)), enc]
+        buf += [np.ascontiguousarray(p).tobytes() for p in parts]
+    return b''.join(buf)
+
+
+def _insert(client, table: str, n_rows: int, cols: list) -> None:
+    client.raw_insert(table, column_names=[c[0] for c in cols],
+                      insert_block=_native_block(n_rows, cols), fmt='Native')
+
+
+def _q_col(var: str, q: np.ndarray, null: np.ndarray) -> tuple[str, str, list[np.ndarray]]:
+    return f'{var}_q', 'Nullable(Int32)', [null.astype(np.uint8), q]
+
+
+def _quantize(vals: np.ndarray, var: str) -> tuple[np.ndarray, np.ndarray]:
+    """(Int32 round(vals / precision) with 0 where NaN, NaN mask)."""
+    null = ~np.isfinite(vals)
+    q = np.zeros(len(vals), dtype=np.int32)
+    q[~null] = np.rint(vals[~null] / precision(var)).astype(np.int32)
+    return q, null
 
 
 # ---------------------------------------------------------------------------
 # Core ingestion
 # ---------------------------------------------------------------------------
 
-def ingest_date(client, date_val: date, nc_base_dir: str = NC_BASE_DIR) -> int:
-    """Insert all hourly rows for date_val into SalishSeaCast_hourly.
+def _delete_existing(client, date_val: date, hourly: bool, daily: bool) -> None:
+    start, end = date_val, date_val + timedelta(days=1)
+    targets = []
+    if hourly:
+        targets.append((HOURLY_TABLE, f"time >= '{start}' AND time < '{end}'"))
+    if daily:
+        targets.append((DAILY_TABLE, f"time = '{start}'"))
+    for table, where in targets:
+        n = client.query(f'SELECT count() FROM {table} WHERE {where}').result_rows[0][0]
+        if n:
+            logger.warning('%s: replacing %d existing %s rows', date_val, n, table)
+            client.command(f'DELETE FROM {table} WHERE {where}')
 
-    Processes one time step (hour) at a time: a full day's grid (24 x 40 x 898 x
-    398 for SSC) is ~343M cells, so building whole-day meshgrid/variable arrays
-    at once (the original approach) peaks at 20+ GB RAM and gets OOM-killed.
-    Per-timestep, peak RAM is bounded by one hour's worth of data (~500 MB).
 
-    Returns the total number of rows inserted.
-    """
-    paths = {var: _nc_path(var, date_val, nc_base_dir) for var in ALL_VARIABLES}
-    missing = [var for var, p in paths.items() if not os.path.exists(p)]
-    if missing:
-        raise FileNotFoundError(f'Missing NC files for {date_val}: {missing}')
+def ingest_day(client, date_val: date, nc_dirs: list[str], variables: list[str] | None = None,
+               hourly: bool = True, daily: bool = True) -> tuple[int, list[str]]:
+    """Write date_val's rows; returns (hourly row count, variables with no value
+    all day). variables: a subset of ALL_VARIABLES including temperature (the
+    ocean-cell mask); the others' columns are left NULL. Raises
+    FileNotFoundError when a requested variable has no NetCDF for the date."""
+    variables = list(variables or ALL_VARIABLES)
+    unknown = [v for v in variables if v not in ALL_VARIABLES]
+    if unknown:
+        raise ValueError(f'Unknown variables: {unknown}')
+    if 'temperature' not in variables:
+        raise ValueError('variables must include temperature (it supplies the ocean-cell mask)')
+    variables = ['temperature'] + [v for v in ALL_VARIABLES if v in variables and v != 'temperature']
 
-    datasets = {var: xr.open_dataset(paths[var], engine='netcdf4') for var in ALL_VARIABLES}
+    files: dict[str, _DayFile] = {}
     try:
-        base_ds = datasets[ALL_VARIABLES[0]]
+        for v in variables:
+            path = find_nc(v, date_val, nc_dirs)
+            if path is None:
+                raise FileNotFoundError(f'No {v} NetCDF for {date_val} in {nc_dirs}')
+            files[v] = _DayFile(v, date_val, path)
+        tf = files['temperature']
+        for v, f in files.items():
+            if not np.array_equal(f.times, tf.times):
+                raise RuntimeError(f'{v} {date_val}: time steps differ from temperature')
+        n_hours = len(tf.times)
+        grid_shape = tf.var.shape[1:]
+        n_cell = int(np.prod(grid_shape))
+        depth_c = np.asarray(tf.ds.variables['depth'][:], dtype=np.float32)
+        gy_c = np.asarray(tf.ds.variables['gridY'][:]).astype(np.uint16)
+        gx_c = np.asarray(tf.ds.variables['gridX'][:]).astype(np.uint16)
+        logger.info('Ingesting %s: %d hours x %s grid, %d variables%s', date_val, n_hours,
+                    grid_shape, len(variables), '' if hourly else ', daily only')
 
-        t_dim = next(d for d in base_ds.dims if 'time' in str(d).lower())
-        d_dim = next(
-            d for d in base_ds.dims
-            if any(k in str(d).lower() for k in ('depth', 'deptht', 'z'))
-        )
-        spatial = [d for d in base_ds.dims if d not in (t_dim, d_dim)]
-        y_dim, x_dim = spatial[0], spatial[1]
+        _delete_existing(client, date_val, hourly, daily)
 
-        times  = base_ds[t_dim].values
-        depths = base_ds[d_dim].values.astype(np.float32)
-        gridY  = base_ds[y_dim].values.astype(np.uint16)
-        gridX  = base_ds[x_dim].values.astype(np.uint16)
-
-        n_t, n_d, n_y, n_x = len(times), len(depths), len(gridY), len(gridX)
-        logger.info('Ingesting %s: %d t × %d d × %d×%d grid', date_val, n_t, n_d, n_y, n_x)
-
-        # Depth/grid coordinates are identical across all time steps — build once.
-        D, Y, X = np.meshgrid(depths, gridY, gridX, indexing='ij')
-        D = D.ravel(); Y = Y.ravel(); X = X.ravel()
-
-        # Daily mean/min/max accumulators for SalishSeaCast_daily, built across
-        # this same per-hour read pass so it never needs its own NC read. Sized
-        # to the full grid (not just one hour's valid cells) because which cells
-        # are valid (see valid_mask below) can differ hour to hour.
-        n_cells   = len(D)
-        day_sum   = {var: np.zeros(n_cells, dtype=np.float64) for var in ALL_VARIABLES}
-        day_min   = {var: np.full(n_cells, np.inf, dtype=np.float32) for var in ALL_VARIABLES}
-        day_max   = {var: np.full(n_cells, -np.inf, dtype=np.float32) for var in ALL_VARIABLES}
-        day_count = np.zeros(n_cells, dtype=np.int32)
-
-        total_inserted = 0
-        for ti in range(n_t):
-            var_slices = {
-                var: datasets[var][var].isel({t_dim: ti}).values.astype(np.float32).ravel()
-                for var in ALL_VARIABLES
-            }
-            # temperature is NaN on land/out-of-grid cells, and exactly 0.0 below the
-            # local seafloor (z-level padding) — both are non-ocean and share this mask
-            # across all 5 download variables, so gating on temperature alone is sufficient.
-            valid_mask = ~np.isnan(var_slices['temperature']) & (var_slices['temperature'] != 0)
-            n_valid = int(valid_mask.sum())
-            if n_valid == 0:
+        hours_valid = np.zeros(n_cell, dtype=np.uint8)              # valid temperature hours per cell
+        day_sum = {v: np.zeros(n_cell, dtype=np.float64) for v in variables} if daily else {}
+        day_cnt = {v: np.zeros(n_cell, dtype=np.uint8) for v in variables} if daily else {}
+        any_value = dict.fromkeys(variables, False)
+        n_rows = 0
+        for h0 in range(0, n_hours, BLOCK_HOURS):
+            sel = slice(h0, min(h0 + BLOCK_HOURS, n_hours))
+            q = {}
+            for v in variables:                                       # temperature first
+                blk = files[v].read(sel)                              # (hours, cells)
+                if v == 'temperature':
+                    valid = np.isfinite(blk) & (blk != 0)
+                    hours_valid += valid.sum(axis=0, dtype=np.uint8)
+                    idx = np.flatnonzero(valid.ravel())               # sorted, hour-major
+                    bounds = np.searchsorted(idx // n_cell, np.arange(blk.shape[0] + 1))
+                    cell = idx % n_cell
+                    di, yi, xi = np.unravel_index(cell, grid_shape)
+                    depth, grid_y, grid_x = depth_c[di], gy_c[yi], gx_c[xi]
+                    del di, yi, xi, cell
+                if daily:
+                    m = valid & np.isfinite(blk)
+                    day_sum[v] += np.where(m, blk, 0).sum(axis=0, dtype=np.float64)
+                    day_cnt[v] += m.sum(axis=0, dtype=np.uint8)
+                    del m
+                vals = blk.ravel()[idx]
+                del blk
+                any_value[v] |= bool(np.isfinite(vals).any())
+                if hourly:
+                    q[v] = _quantize(vals, v)
+            n_rows += len(idx)
+            if not hourly:
                 continue
+            for h in range(len(bounds) - 1):
+                a, b = int(bounds[h]), int(bounds[h + 1])
+                if a == b:
+                    continue
+                t = np.full(b - a, tf.times[h0 + h].astype(np.int64), dtype=np.uint32)
+                cols = [('time', 'DateTime', [t]), ('depth', 'Float32', [depth[a:b]]),
+                        ('gridX', 'UInt16', [grid_x[a:b]]), ('gridY', 'UInt16', [grid_y[a:b]])]
+                cols += [_q_col(v, q[v][0][a:b], q[v][1][a:b]) for v in variables]
+                _insert(client, HOURLY_TABLE, b - a, cols)
 
-            t_val      = pd.Timestamp(times[ti])
-            valid_D    = D[valid_mask]
-            valid_Y    = Y[valid_mask]
-            valid_X    = X[valid_mask]
-            valid_vars = {var: var_slices[var][valid_mask] for var in ALL_VARIABLES}
-
-            day_count[valid_mask] += 1
-            for var in ALL_VARIABLES:
-                vals = valid_vars[var]
-                day_sum[var][valid_mask] += vals
-                cur_min, cur_max = day_min[var], day_max[var]
-                cur_min[valid_mask] = np.minimum(cur_min[valid_mask], vals)
-                cur_max[valid_mask] = np.maximum(cur_max[valid_mask], vals)
-
-            for batch_start in range(0, n_valid, _BATCH_SIZE):
-                sl = slice(batch_start, min(n_valid, batch_start + _BATCH_SIZE))
-                df = pd.DataFrame({
-                    'time':  t_val,
-                    'depth': valid_D[sl],
-                    'gridX': valid_X[sl],
-                    'gridY': valid_Y[sl],
-                    **{var: valid_vars[var][sl] for var in ALL_VARIABLES},
-                })
-                client.insert('SalishSeaCast_hourly', df, column_names=list(df.columns))
-                total_inserted += len(df)
-
-            logger.debug('t=%d: inserted %d rows (%d valid cells)', ti, n_valid, n_valid)
-
-        _insert_daily_aggregate(client, date_val, D, Y, X, day_sum, day_min, day_max, day_count)
-
+        if daily:
+            rows = np.flatnonzero(hours_valid)
+            if not len(rows):
+                raise RuntimeError(f'{date_val}: no valid temperature cells')
+            di, yi, xi = np.unravel_index(rows, grid_shape)
+            n = len(rows)
+            day_no = (np.datetime64(date_val, 'D') - np.datetime64('1970-01-01', 'D')).astype(int)
+            cols = [('time', 'Date', [np.full(n, day_no, dtype=np.uint16)]),
+                    ('depth', 'Float32', [depth_c[di]]),
+                    ('gridX', 'UInt16', [gx_c[xi]]), ('gridY', 'UInt16', [gy_c[yi]])]
+            for v in variables:
+                cnt = day_cnt[v][rows]
+                with np.errstate(invalid='ignore', divide='ignore'):
+                    mean = day_sum.pop(v)[rows] / cnt
+                cols.append(_q_col(v, *_quantize(mean, v)))
+            _insert(client, DAILY_TABLE, n, cols)
+            logger.info('%s: %d daily rows', date_val, n)
     finally:
-        for ds in datasets.values():
-            ds.close()
+        for f in files.values():
+            f.ds.close()
 
-    logger.info('Ingestion complete for %s: %d rows', date_val, total_inserted)
-    return total_inserted
+    missing = [v for v in variables if not any_value[v]]
+    if missing:
+        logger.warning('%s: no values at all for %s', date_val, ', '.join(missing))
+    logger.info('Ingestion complete for %s: %d hourly rows%s', date_val, n_rows,
+                '' if hourly else ' (not inserted, daily only)')
+    return n_rows, missing
 
 
-def _insert_daily_aggregate(
-    client, date_val: date,
-    D: np.ndarray, Y: np.ndarray, X: np.ndarray,
-    day_sum: dict, day_min: dict, day_max: dict, day_count: np.ndarray,
-) -> None:
-    """Insert one day's mean/min/max per cell into SalishSeaCast_daily.
-
-    A cell is included only if at least one hour had valid (non-land,
-    non-seafloor-padding) data for it — same inclusion rule as the historical
-    bulk-load table this feeds.
-    """
-    day_valid = day_count > 0
-    n_day_valid = int(day_valid.sum())
-    if n_day_valid == 0:
-        logger.warning('No valid cells for daily aggregation on %s', date_val)
-        return
-
-    counts       = day_count[day_valid]
-    daily_means  = {var: (day_sum[var][day_valid] / counts).astype(np.float32) for var in ALL_VARIABLES}
-    daily_mins   = {var: day_min[var][day_valid] for var in ALL_VARIABLES}
-    daily_maxs   = {var: day_max[var][day_valid] for var in ALL_VARIABLES}
-    daily_D, daily_Y, daily_X = D[day_valid], Y[day_valid], X[day_valid]
-
-    n_inserted = 0
-    for batch_start in range(0, n_day_valid, _BATCH_SIZE):
-        sl = slice(batch_start, min(n_day_valid, batch_start + _BATCH_SIZE))
-        df = pd.DataFrame({
-            'time':  date_val,
-            'depth': daily_D[sl],
-            'gridX': daily_X[sl],
-            'gridY': daily_Y[sl],
-            **{f'{var}_mean': daily_means[var][sl] for var in ALL_VARIABLES},
-            **{f'{var}_min': daily_mins[var][sl] for var in ALL_VARIABLES},
-            **{f'{var}_max': daily_maxs[var][sl] for var in ALL_VARIABLES},
-        })
-        client.insert('SalishSeaCast_daily', df, column_names=list(df.columns))
-        n_inserted += len(df)
-    logger.info('Daily aggregation complete for %s: %d rows', date_val, n_inserted)
+def ingest_date(client, date_val: date, nc_base_dir: str = NC_BASE_DIR,
+                variables: list[str] | None = None, hourly: bool = True) -> int:
+    """ingest_day from one NetCDF root; returns the hourly row count."""
+    return ingest_day(client, date_val, [nc_base_dir], variables=variables, hourly=hourly)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +283,6 @@ def process_pending_ingests(client, limit: int = 5, nc_base_dir: str = NC_BASE_D
         return
 
     for date_val in dates:
-        # Mark all 8 variables as ingesting
         for var in ALL_VARIABLES:
             row      = get_row(client, date_val, var) or {}
             attempts = row.get('attempts', 0)
@@ -195,6 +290,7 @@ def process_pending_ingests(client, limit: int = 5, nc_base_dir: str = NC_BASE_D
 
         try:
             n_rows = ingest_date(client, date_val, nc_base_dir=nc_base_dir)
+            image_daily_surface(date_val)
             for var in ALL_VARIABLES:
                 row      = get_row(client, date_val, var) or {}
                 attempts = row.get('attempts', 0)

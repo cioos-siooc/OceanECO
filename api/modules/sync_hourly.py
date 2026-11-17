@@ -16,8 +16,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import shutil
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+
+from shared.ssc_schema import daily_sql, hourly_sql
 
 from .clickhouse_helpers import get_ch_client
 
@@ -25,6 +29,14 @@ logger = logging.getLogger('api.sync_hourly')
 
 SYNC_STAGING_DIR = os.environ.get('SSC_SYNC_STAGING_DIR', '/opt/data/SalishSeaCast/sync_staging')
 SYNC_API_TOKEN   = os.environ.get('SYNC_API_TOKEN', '')
+
+# Hourly rows and tiles are kept for this many days back from the newest synced
+# date (pruned after each successful hourly sync, see prune_hourly); 0 = never.
+HOURLY_RETENTION_DAYS = int(os.environ.get('SSC_HOURLY_RETENTION_DAYS', '92'))
+SSC_IMAGE_DIR = os.environ.get('SSC_IMAGE_DIR', '/opt/data/SalishSeaCast/images')
+# Hourly tile folders: {var}/{YYYY-MM-DDTHHMMSS}/ (daily YYYY-MM-DD and monthly
+# YYYY-MM folders don't match and are never pruned).
+_HOURLY_DIR_RE = re.compile(r'^(\d{4}-\d{2}-\d{2})T\d{2}:?\d{2}:?\d{2}$')
 
 # A 'syncing' claim older than this is treated as abandoned (e.g. the server
 # crashed mid-import) and may be retried rather than permanently blocking.
@@ -48,54 +60,10 @@ CREATE TABLE IF NOT EXISTS SalishSeaCast_daily_sync_log (
 ORDER BY date
 """
 
-# Same 8 variables as process/SSC/db.py / process/SSC/config.py.ALL_VARIABLES.
-# Duplicated here rather than imported because api/ and process/ are
-# separate deployables with their own dependency trees (see CLAUDE.md).
-_VARIABLES = [
-    'temperature', 'salinity', 'total_alkalinity', 'dissolved_oxygen',
-    'dissolved_inorganic_carbon', 'ph_total', 'omega_arag', 'omega_cal',
-]
-
-# IF NOT EXISTS: on a deployment where `process` shared this same ClickHouse
-# instance (the old bundled docker-compose.prod.backend.yml), this table
-# already exists and these are no-ops. On a fresh API-only ClickHouse (see
-# docker-compose.prod.api.yml) — which never runs `process`, so nothing else
-# ever creates SalishSeaCast_hourly — this is what actually creates it.
-_VARIABLE_COLS = '\n    '.join(
-    f'{var} Float32 CODEC(Gorilla, ZSTD(4)),' for var in _VARIABLES
-)
-
-_CREATE_HOURLY_DATA = f"""
-CREATE TABLE IF NOT EXISTS SalishSeaCast_hourly (
-    time     DateTime  CODEC(DoubleDelta, ZSTD(4)),
-    depth    Float32   CODEC(Gorilla, ZSTD(4)),
-    gridX    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    gridY    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    {_VARIABLE_COLS}
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(time)
-ORDER BY (gridX, gridY, depth, time)
-"""
-
-_DAILY_VARIABLE_COLS = '\n    '.join(
-    f'{var}_{stat} Float32 CODEC(Gorilla, ZSTD(4)),'
-    for var in _VARIABLES for stat in ('mean', 'min', 'max')
-)
-
-# IF NOT EXISTS: SalishSeaCast_daily already exists on deployments that ran
-# the historical bulk-load script — this is a no-op there, and a safety net
-# on a fresh ClickHouse instance that's never seen it.
-_CREATE_DAILY_DATA = f"""
-CREATE TABLE IF NOT EXISTS SalishSeaCast_daily (
-    time     Date      CODEC(DoubleDelta, ZSTD(4)),
-    depth    Float32   CODEC(Gorilla, ZSTD(4)),
-    gridX    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    gridY    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    {_DAILY_VARIABLE_COLS}
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(time)
-ORDER BY (gridX, gridY, time, depth)
-"""
+# The data tables' DDL (Int32 `_q` columns + decoding ALIAS columns) is shared
+# with process/, which writes them: shared/ssc_schema.py. IF NOT EXISTS there,
+# so this only creates them on a fresh ClickHouse; existing tables are left as
+# they are.
 
 
 class SyncConflict(Exception):
@@ -109,8 +77,8 @@ class SyncError(Exception):
 def ensure_schema(client) -> None:
     client.command(_CREATE_SYNC_LOG)
     client.command(_CREATE_DAILY_SYNC_LOG)
-    client.command(_CREATE_HOURLY_DATA)
-    client.command(_CREATE_DAILY_DATA)
+    client.command(hourly_sql())
+    client.command(daily_sql())
 
 
 def _native_path(date_val: date, suffix: str = '') -> str:
@@ -277,13 +245,60 @@ def import_native_file(date_str: str, expected_rows: int) -> dict:
         delete_existing_sql='ALTER TABLE SalishSeaCast_hourly DELETE WHERE time >= %(start)s AND time < %(end)s',
         expected_rows=expected_rows,
     )
-    return {'date': date_str, 'rows': rows}
+    pruned = None
+    try:
+        pruned = prune_hourly(client)
+    except Exception:
+        # The import itself is committed; a failed prune is retried after the next sync.
+        logger.exception('Pruning old hourly data failed after syncing %s', date_val)
+    return {'date': date_str, 'rows': rows, 'pruned': pruned}
+
+
+def prune_hourly(client, retention_days: int = HOURLY_RETENTION_DAYS,
+                 image_dir: str = SSC_IMAGE_DIR) -> Optional[dict]:
+    """Drop hourly data older than retention_days before the newest synced date:
+    SalishSeaCast_hourly's monthly partitions lying wholly before the cutoff
+    (so up to a month more is kept in the table; the /png fallback renders
+    from it), and hourly tile folders dated before the cutoff, day by day.
+    SalishSeaCast_daily and daily/monthly tiles are never touched."""
+    if retention_days <= 0:
+        return None
+    newest = client.query(
+        "SELECT max(date) FROM SalishSeaCast_sync_log FINAL WHERE status = 'success'"
+    ).result_rows[0][0]
+    if not newest or newest.year < 2000:          # empty log -> Date 1970-01-01
+        return None
+    cutoff = newest - timedelta(days=retention_days - 1)   # first date kept
+    cutoff_month = cutoff.year * 100 + cutoff.month
+
+    partitions = [p for (p,) in client.query(
+        "SELECT DISTINCT partition_id FROM system.parts WHERE database = currentDatabase() "
+        "AND table = 'SalishSeaCast_hourly' AND active").result_rows
+        if p.isdigit() and int(p) < cutoff_month]
+    for p in sorted(partitions):
+        client.command(f"ALTER TABLE SalishSeaCast_hourly DROP PARTITION ID '{p}'")
+        logger.info('Pruned SalishSeaCast_hourly partition %s (cutoff %s)', p, cutoff)
+
+    n_dirs = 0
+    if os.path.isdir(image_dir):
+        for var in sorted(os.listdir(image_dir)):
+            var_dir = os.path.join(image_dir, var)
+            if not os.path.isdir(var_dir):
+                continue
+            for name in os.listdir(var_dir):
+                m = _HOURLY_DIR_RE.match(name)
+                if m and m.group(1) < cutoff.isoformat():
+                    shutil.rmtree(os.path.join(var_dir, name), ignore_errors=True)
+                    n_dirs += 1
+    if n_dirs:
+        logger.info('Pruned %d hourly tile folders before %s from %s', n_dirs, cutoff, image_dir)
+    return {'cutoff': cutoff.isoformat(), 'partitions': sorted(partitions), 'tile_dirs': n_dirs}
 
 
 def import_daily_native_file(date_str: str, expected_rows: int) -> dict:
     """Claim, import and finish the SalishSeaCast_daily sync for date_str.
 
-    Same contract as import_native_file, against the daily mean/min/max
+    Same contract as import_native_file, against the daily means
     table instead (time is a Date column there, so the existence check is
     an equality match rather than a range).
     """

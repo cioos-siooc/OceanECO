@@ -25,6 +25,9 @@ DOWNLOAD_VARIABLES: list[str] = [
     'total_alkalinity',
     'dissolved_oxygen',
     'dissolved_inorganic_carbon',
+    'nitrate',
+    'diatoms',
+    'flagellates',
 ]
 
 # Variables derived via PyCO2SYS (all three are computed together in one pass)
@@ -42,7 +45,10 @@ PYCO2SYS_INPUTS: list[str] = [
     'salinity',
 ]
 
-ALL_VARIABLES: list[str] = DOWNLOAD_VARIABLES + COMPUTE_VARIABLES
+# Every model variable, in the tables' column order (shared/ssc_schema.py).
+from shared.ssc_schema import SSC_VARIABLES as ALL_VARIABLES  # noqa: E402
+
+assert sorted(ALL_VARIABLES) == sorted(DOWNLOAD_VARIABLES + COMPUTE_VARIABLES)
 
 # ERDDAP griddap dataset IDs.  Each variable is downloaded individually
 # (ERDDAP rejects multi-variable requests), but both variables within a
@@ -52,6 +58,9 @@ ERDDAP_BASE = os.getenv('ERDDAP_BASE', 'https://salishsea.eos.ubc.ca/erddap')
 ERDDAP_DATASET_IDS: dict[str, str] = {
     'chemistry': os.getenv('ERDDAP_DATASET_CHEMISTRY', 'ubcSSg3DChemistryFields1hV21-11'),
     'physics':   os.getenv('ERDDAP_DATASET_PHYSICS',   'ubcSSg3DPhysicsFields1hV21-11'),
+    # Not downloaded by the daily pipeline yet; used by rebuild_daily.py to
+    # re-fetch corrupt chunks of the nitrate/diatoms/flagellates archives.
+    'biology':   os.getenv('ERDDAP_DATASET_BIOLOGY',   'ubcSSg3DBiologyFields1hV21-11'),
 }
 
 # Maps each download variable to its dataset key above
@@ -61,6 +70,9 @@ VARIABLE_DATASET: dict[str, str] = {
     'dissolved_oxygen':           'chemistry',
     'temperature':                'physics',
     'salinity':                   'physics',
+    'nitrate':                    'biology',
+    'diatoms':                    'biology',
+    'flagellates':                'biology',
 }
 
 
@@ -107,10 +119,10 @@ VARIABLE_PRECISION: dict[str, float] = {
 #
 # failed_* variants exist for each active (non-pending) step.
 # Promotion rules:
-#   check_image  (success_download × 5 + success_compute × 3) → pending_image : all 8 together
-#   promote      success_image (all 8) → pending_ingest
-#   promote      success_ingest (all 8) → pending_sync
-#   pending_compute trigger            : all 5 download vars must be past download stage
+#   check_image  (success_download × 8 + success_compute × 3) → pending_image : all together
+#   promote      success_image (all) → pending_ingest
+#   promote      success_ingest (all) → pending_sync
+#   pending_compute trigger            : all download vars must be past download stage
 #
 # The sync stage (this process pipeline may run on a remote server) exports the
 # date's rows to a Native-format file, rsyncs it plus the WebP images to the
@@ -148,7 +160,7 @@ STATUS_FAILED_SYNC       = 'failed_sync'
 MAX_RETRY_ATTEMPTS = int(os.getenv('SSC_MAX_RETRY_ATTEMPTS', '3'))
 
 # Statuses indicating a download variable has moved past its download stage.
-# Used as the compute gate: all 5 download vars must be in this set.
+# Used as the compute gate: all download vars must be in this set.
 PAST_DOWNLOAD_STATUSES: frozenset[str] = frozenset({
     STATUS_SUCCESS_DOWNLOAD,
     STATUS_PENDING_IMAGE, STATUS_IMAGING, STATUS_SUCCESS_IMAGE, STATUS_FAILED_IMAGE,

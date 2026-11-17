@@ -5,25 +5,31 @@ Usage (from the process/ directory):
   python -m SSC.cli download    [--date YYYY-MM-DD] [--variable VAR] [--limit N] [--force]
   python -m SSC.cli compute     [--date YYYY-MM-DD] [--limit N] [--workers N] [--force]
   python -m SSC.cli check_image [--limit N]
-  python -m SSC.cli image       [--date YYYY-MM-DD] [--variable VAR] [--limit N] [--workers N] [--force]
+  python -m SSC.cli image       [--date YYYY-MM-DD] [--variable VAR] [--limit N] [--workers N] [--force] [--surface-only]
   python -m SSC.cli promote     [--limit N]
-  python -m SSC.cli ingest      [--date YYYY-MM-DD] [--limit N] [--force]
+  python -m SSC.cli ingest      [--date YYYY-MM-DD] [--limit N] [--force] [--variables V,V] [--daily-only]
   python -m SSC.cli sync        [--date YYYY-MM-DD] [--limit N] [--force]
   python -m SSC.cli run         [--date YYYY-MM-DD] [--limit N] [--workers N] [--force] [--init-days N]
   python -m SSC.cli status      [--date YYYY-MM-DD]
+  python -m SSC.cli rebuild-daily --year YYYY [--workers N] [--init] [--stage all|read|insert]
+                                [--variables V,V] [--days N] [--keep-scratch]
+  python -m SSC.cli rebuild-hourly --start YYYY-MM-DD --end YYYY-MM-DD [--workers N] [--init]
 
 Commands:
   check       Query ERDDAP for new dates and create status rows.
   download    Process pending_download jobs.
   compute     Process pending_compute jobs (PyCO2SYS).
-  check_image Find dates where all 8 variables are at their stage's success
+  check_image Find dates where all variables are at their stage's success
               state (5x success_download + 3x success_compute) and promote
-              all 8 together to pending_image. Never starts imaging on a
+              all together to pending_image. Never starts imaging on a
               partial date.
   image       Process pending_image jobs (nc2tile WebP).
   ingest      Process pending_ingest jobs (insert into SalishSeaCast_hourly).
-  promote     Advance fully-imaged dates (all 8 at success_image) to
-              pending_ingest, and fully-ingested dates (all 8 at
+              --variables / --daily-only make it an ad-hoc backfill of NC files
+              already on disk: needs --date, bypasses SalishSeaCast_status
+              (neither checked nor written), and inserts without dedup.
+  promote     Advance fully-imaged dates (all at success_image) to
+              pending_ingest, and fully-ingested dates (all at
               success_ingest) to pending_sync.
   sync        Process pending_sync jobs: export the date's hourly rows to a
               Native-format file, rsync it plus the WebP images to the API
@@ -42,6 +48,11 @@ Commands:
               pending_image resumes from imaging onward rather than
               restarting at download.
   status      Print pipeline status for a date (default: last 7 days).
+  rebuild-daily
+              Archive instance only (docker-compose.archive.yml): stream one
+              year of hourly NetCDF per variable into integer daily means,
+              then insert into the yearly-partitioned SalishSeaCast_daily.
+              Resumable; see SSC/rebuild_daily.py.
 
 `run` on a schedule, with a monitoring UI: see SSC/flows.py (Prefect).
 
@@ -205,7 +216,7 @@ def cmd_compute(args) -> None:
 
 
 def _image_date(client, date_val, variable=None, workers=None, force=False,
-                nc_dir=None, image_dir=None) -> None:
+                nc_dir=None, image_dir=None, surface_only=False) -> None:
     from .imaging import image_variable
     from .config import ALL_VARIABLES, IMAGE_BASE_DIR, NC_BASE_DIR, PAST_IMAGE_STATUSES
     from .db import get_row
@@ -226,12 +237,14 @@ def _image_date(client, date_val, variable=None, workers=None, force=False,
             raise PipelineError(f'Unknown variable: {variable}')
         if not _should_skip(variable):
             image_variable(client, date_val, variable, workers=workers,
-                           nc_base_dir=nc_dir, image_base_dir=image_dir)
+                           nc_base_dir=nc_dir, image_base_dir=image_dir,
+                           surface_only=surface_only)
     else:
         for var in ALL_VARIABLES:
             if not _should_skip(var):
                 image_variable(client, date_val, var, workers=workers,
-                               nc_base_dir=nc_dir, image_base_dir=image_dir)
+                               nc_base_dir=nc_dir, image_base_dir=image_dir,
+                               surface_only=surface_only)
 
 
 def cmd_image(args) -> None:
@@ -244,7 +257,10 @@ def cmd_image(args) -> None:
 
     if args.date:
         _image_date(client, _parse_date(args.date), variable=args.variable, workers=workers,
-                    force=args.force, nc_dir=nc_dir, image_dir=image_dir)
+                    force=args.force, nc_dir=nc_dir, image_dir=image_dir,
+                    surface_only=args.surface_only)
+    elif args.surface_only:
+        raise PipelineError('--surface-only needs --date')
     else:
         process_pending_images(client, limit=args.limit, workers=workers,
                                nc_base_dir=nc_dir, image_base_dir=image_dir)
@@ -252,6 +268,7 @@ def cmd_image(args) -> None:
 
 
 def _ingest_date(client, date_val, force=False, nc_dir=None) -> None:
+    from .imaging import image_daily_surface
     from .ingest import ingest_date
     from .config import (
         ALL_VARIABLES, NC_BASE_DIR,
@@ -261,8 +278,8 @@ def _ingest_date(client, date_val, force=False, nc_dir=None) -> None:
     nc_dir = nc_dir or os.getenv('SSC_NC_DIR', NC_BASE_DIR)
 
     if not force:
-        # SalishSeaCast_hourly is a plain MergeTree (no dedup) — re-running
-        # ingest on an already-ingested date would insert duplicate rows.
+        # ingest_date replaces the date's rows, so --force is safe; this only
+        # avoids redoing a finished date.
         already = [
             var for var in ALL_VARIABLES
             if (row := get_row(client, date_val, var)) and row['status'] == STATUS_SUCCESS_INGEST
@@ -280,6 +297,7 @@ def _ingest_date(client, date_val, force=False, nc_dir=None) -> None:
         mark_running(client, date_val, var, STATUS_INGESTING, row.get('attempts', 0))
     try:
         n = ingest_date(client, date_val, nc_base_dir=nc_dir)
+        image_daily_surface(date_val)
         for var in ALL_VARIABLES:
             row = get_row(client, date_val, var) or {}
             mark_success(client, date_val, var, STATUS_SUCCESS_INGEST,
@@ -292,17 +310,75 @@ def _ingest_date(client, date_val, force=False, nc_dir=None) -> None:
                         'ingest_date raised an exception', attempts=row.get('attempts', 0))
 
 
+def _backfill_ingest(client, date_val, variables, hourly, nc_dir) -> None:
+    """Ad-hoc ingest of NC files already on disk, outside the status machine:
+    a subset of variables and/or daily-only rows don't fit its all-variables
+    states, so SalishSeaCast_status is neither checked nor written. Replaces
+    the date's rows (daily, and hourly unless daily-only): variables left out
+    are NULL afterwards, not kept."""
+    from .ingest import ingest_date
+    n = ingest_date(client, date_val, nc_base_dir=nc_dir, variables=variables, hourly=hourly)
+    logger.info('backfill ingest %s (%s%s): %d hourly rows', date_val,
+                ','.join(variables) if variables else 'all variables',
+                ', daily only' if not hourly else '', n)
+
+
 def cmd_ingest(args) -> None:
     from .ingest import process_pending_ingests
     from .config import NC_BASE_DIR
     client = _get_client()
     nc_dir = os.getenv('SSC_NC_DIR', NC_BASE_DIR)
 
-    if args.date:
+    if args.variables or args.daily_only:
+        if not args.date:
+            raise PipelineError('--variables / --daily-only need --date')
+        variables = [v.strip() for v in args.variables.split(',')] if args.variables else None
+        try:
+            _backfill_ingest(client, _parse_date(args.date), variables,
+                             hourly=not args.daily_only, nc_dir=nc_dir)
+        except (ValueError, FileNotFoundError) as e:
+            raise PipelineError(str(e)) from e
+    elif args.date:
         _ingest_date(client, _parse_date(args.date), force=args.force, nc_dir=nc_dir)
     else:
         process_pending_ingests(client, limit=args.limit, nc_base_dir=nc_dir)
     client.close()
+
+
+def cmd_rebuild_daily(args) -> None:
+    # Plain get_client(), not _get_client(): the archive instance must not get
+    # the pipeline's status tables (ensure_schema).
+    from .db import get_client
+    from .rebuild_daily import init_schema, rebuild_year
+    client = get_client()
+    try:
+        if args.init:
+            init_schema(client)
+        variables = [v.strip() for v in args.variables.split(',')] if args.variables else None
+        rebuild_year(client, args.year, workers=args.workers, stage=args.stage,
+                     variables=variables, n_days=args.days, keep_scratch=args.keep_scratch)
+    except (ValueError, FileNotFoundError, RuntimeError, KeyError) as e:
+        raise PipelineError(str(e)) from e
+    finally:
+        client.close()
+
+
+def cmd_rebuild_hourly(args) -> None:
+    from .db import get_client
+    from .rebuild_hourly import init_schema, rebuild_range
+    client = get_client()
+    try:
+        if args.init:
+            init_schema(client)
+    finally:
+        client.close()
+    try:
+        failed = rebuild_range(date.fromisoformat(args.start), date.fromisoformat(args.end),
+                               workers=args.workers)
+    except (ValueError, FileNotFoundError, RuntimeError, KeyError) as e:
+        raise PipelineError(str(e)) from e
+    if failed:
+        raise PipelineError(f'{len(failed)} day(s) failed: {failed}')
 
 
 def _sync_date(client, date_val, force=False, image_dir=None) -> None:
@@ -501,18 +577,47 @@ def main(argv=None) -> None:
     p.set_defaults(func=cmd_compute)
 
     p = sub.add_parser('check_image',
-                       help='Promote dates where all 8 variables succeeded (download+compute) to pending_image')
+                       help='Promote dates where all variables succeeded (download+compute) to pending_image')
     _add_limit(p, default=20)
     p.set_defaults(func=cmd_check_image)
 
     p = sub.add_parser('image', help='Generate WebP tiles via nc2tile')
     _add_date(p); _add_limit(p, default=40); _add_workers(p, default=30); _add_force(p)
     p.add_argument('--variable', metavar='VAR', help='Restrict to one variable')
+    p.add_argument('--surface-only', action='store_true',
+                   help='Render only the first (surface) depth, no bottom layer; needs --date')
     p.set_defaults(func=cmd_image)
 
     p = sub.add_parser('ingest', help='Insert hourly rows into SalishSeaCast_hourly')
     _add_date(p); _add_limit(p, default=5); _add_force(p)
+    p.add_argument('--variables', metavar='V,V',
+                   help='Backfill only these variables (must include temperature); '
+                        'others are written as NaN. Needs --date, bypasses status')
+    p.add_argument('--daily-only', action='store_true',
+                   help='Backfill SalishSeaCast_daily only, no hourly rows. Needs --date, bypasses status')
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser('rebuild-daily',
+                       help='Rebuild one year of the integer, yearly-partitioned SalishSeaCast_daily '
+                            '(archive instance) from hourly NetCDF')
+    p.add_argument('--year', type=int, required=True)
+    _add_workers(p, default=6)
+    p.add_argument('--init', action='store_true', help='Create the archive tables first')
+    p.add_argument('--stage', choices=('all', 'read', 'repair', 'insert'), default='all',
+                   help='all = read -> repair (corrupt NC chunks re-fetched from ERDDAP, '
+                        'written back, affected variables re-read) -> insert')
+    p.add_argument('--variables', metavar='V,V', help='Subset (must include temperature for --stage insert)')
+    p.add_argument('--days', type=int, metavar='N', help='Only the first N days (smoke test)')
+    p.add_argument('--keep-scratch', action='store_true', help='Keep the scratch memmaps after insert')
+    p.set_defaults(func=cmd_rebuild_daily)
+
+    p = sub.add_parser('rebuild-hourly',
+                       help='Load integer SalishSeaCast_hourly (archive instance) from per-day NetCDF')
+    p.add_argument('--start', required=True, metavar='YYYY-MM-DD')
+    p.add_argument('--end', required=True, metavar='YYYY-MM-DD')
+    _add_workers(p, default=4)
+    p.add_argument('--init', action='store_true', help='Create the hourly tables first')
+    p.set_defaults(func=cmd_rebuild_hourly)
 
     p = sub.add_parser('promote',
                        help='Advance success_image(8)->pending_ingest and success_ingest(8)->pending_sync')

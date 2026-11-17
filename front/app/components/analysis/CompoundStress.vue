@@ -43,7 +43,7 @@ import * as echarts from 'echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import type { SeriesPoint, AnalysisLocation } from '~~/composables/useAnalysisFetch'
-import { availableVariables, filterBySeason, maskBySeason, breakDataGaps, groupByYear } from '~~/composables/useAnalysisStatistics'
+import { filterBySeason, maskBySeason, breakDataGaps, groupByYear } from '~~/composables/useAnalysisStatistics'
 import { useMainStore } from '../../stores/main'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import { csvMeta, useCsvExport, type CsvDataset } from '~~/composables/useCsvExport'
@@ -62,11 +62,10 @@ const props = defineProps<{
   fetchSeries: (variableId: string, depth: number, location: AnalysisLocation) => Promise<SeriesPoint[]>
 }>()
 
-function varName(id: string) { return availableVariables.find(v => v.id === id)?.name || id }
-const { displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue, variableLabel: varName, modelVariables } = useVariableRegistry()
 function axisName(id: string) { const u = displayUnit(id); return u ? `${varName(id)} (${u})` : varName(id) }
 
-const otherVariables = computed(() => availableVariables.filter(v => v.id !== props.primaryVariable))
+const otherVariables = computed(() => modelVariables.value.filter(v => v.id !== props.primaryVariable))
 
 // Store-backed so a shared link restores the pair and thresholds the sender set.
 const VIEW_SCOPE = 'analysis.compound'

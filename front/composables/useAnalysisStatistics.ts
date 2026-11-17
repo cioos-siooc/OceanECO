@@ -1,17 +1,6 @@
 import type { SeriesPoint } from './useAnalysisFetch';
 import type { ECharts } from 'echarts';
 
-export const availableVariables = [
-    { id: 'temperature', name: 'Temperature' },
-    { id: 'salinity', name: 'Salinity' },
-    { id: 'dissolved_oxygen', name: 'Dissolved Oxygen' },
-    { id: 'total_alkalinity', name: 'Total Alkalinity' },
-    { id: 'dissolved_inorganic_carbon', name: 'Dissolved Inorganic Carbon' },
-    { id: 'ph_total', name: 'pH (Total Scale)' },
-    { id: 'omega_arag', name: 'Omega Aragonite' },
-    { id: 'omega_cal', name: 'Omega Calcite' },
-];
-
 export const SEASON_MONTHS: Record<string, number[]> = {
     full_year: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     jja: [6, 7, 8],

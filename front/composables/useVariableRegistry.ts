@@ -53,6 +53,10 @@ export function useVariableRegistry() {
         return map;
     });
 
+    /** Every displayed variable as `{ id, name }`, in config order — the list for variable pickers. */
+    const modelVariables = computed(() =>
+        Array.from(labels.value, ([id, name]) => ({ id, name })));
+
     function variableUnit(varId: string): string {
         return units.value.get(varId) ?? '';
     }
@@ -138,7 +142,7 @@ export function useVariableRegistry() {
     }
 
     return {
-        labels, isModelVariable, variableLabel, variableUnit, modelVariablesOf,
+        labels, modelVariables, isModelVariable, variableLabel, variableUnit, modelVariablesOf,
         variableAltUnits, displayUnit, toDisplayValue, toCanonicalValue,
         variableDecimals, formatDisplayValue,
     };

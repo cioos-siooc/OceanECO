@@ -8,7 +8,7 @@ Uses memory-mapped temporary files so each time step is processed by a worker
 process independently, keeping peak RAM bounded regardless of grid size.
 
 After successful computation, all three compute variables are marked
-success_compute.  Call db.check_image_ready() once all 8 variables for the
+success_compute.  Call db.check_image_ready() once all variables for the
 date have succeeded to advance them together to pending_image.
 """
 from __future__ import annotations
@@ -96,6 +96,8 @@ def _worker(mem_info: dict) -> tuple[int, int]:
             salinity=sal_flat[mask], temperature=t_flat[mask],
             pressure=p_flat[mask],
             opt_pH_scale=1, opt_k_carbonic=10,
+            # Skip the autograd buffer factors (unused): ~1.7x faster, pH/Ω bit-identical.
+            opt_buffers_mode=0,
         )
 
         ph_flat  = np.full(len(ta_flat), np.nan, dtype=np.float32)

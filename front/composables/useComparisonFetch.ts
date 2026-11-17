@@ -7,9 +7,7 @@ export interface DailyPoint {
 
 export interface ComparisonPoint {
     date: string
-    model: number | null
-    modelMin: number | null
-    modelMax: number | null
+    model: number | null   // model daily mean
     sensor: number | null
 }
 
@@ -61,7 +59,7 @@ export function maskBySeason(points: ComparisonPoint[], season: Season): Compari
     return points.map(p => {
         const m = parseInt(p.date.slice(5, 7), 10)
         if (months.includes(m)) return p
-        return { date: p.date, model: null, modelMin: null, modelMax: null, sensor: null }
+        return { date: p.date, model: null, sensor: null }
     })
 }
 
@@ -99,16 +97,12 @@ export function aggregateSensorToDaily(times: string[], values: (number | null)[
         .sort((a, b) => a.date.localeCompare(b.date))
 }
 
-/** Combine model min/mean/max series with sensor daily means into one aligned array. */
+/** Combine the model's daily means with sensor daily means into one aligned array. */
 export function buildComparisonSeries(
     meanSeries: SeriesPoint[],
-    minSeries: SeriesPoint[],
-    maxSeries: SeriesPoint[],
     sensorDaily: DailyPoint[]
 ): ComparisonPoint[] {
     const meanMap = new Map(meanSeries.map(p => [p.time.slice(0, 10), p.value]))
-    const minMap = new Map(minSeries.map(p => [p.time.slice(0, 10), p.value]))
-    const maxMap = new Map(maxSeries.map(p => [p.time.slice(0, 10), p.value]))
     const sensorMap = new Map(sensorDaily.map(p => [p.date, p.value]))
 
     // Union of all dates so gaps are visible in the chart
@@ -116,8 +110,6 @@ export function buildComparisonSeries(
     return Array.from(allDates).sort().map(date => ({
         date,
         model: meanMap.get(date) ?? null,
-        modelMin: minMap.get(date) ?? null,
-        modelMax: maxMap.get(date) ?? null,
         sensor: sensorMap.get(date) ?? null,
     }))
 }
@@ -217,7 +209,7 @@ export function computeSeasonalCycleStats(clim: MonthlyClimatology[]): SeasonalC
 /** Compute bias, RMSE, and Pearson R on matched (non-null) daily pairs. */
 export function computeComparisonStats(points: ComparisonPoint[]): ComparisonStats {
     const pairs = points.filter(p => p.model != null && p.sensor != null) as
-        { date: string; model: number; modelMin: number | null; modelMax: number | null; sensor: number }[]
+        { date: string; model: number; sensor: number }[]
     const n = pairs.length
     if (n === 0) return { bias: 0, rmse: 0, pearsonR: 0, n: 0 }
 

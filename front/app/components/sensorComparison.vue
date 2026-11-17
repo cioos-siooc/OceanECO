@@ -111,7 +111,6 @@ import { useMainStore, formatDepthLabel } from '../stores/main'
 import { fetchAnalysisSeries } from '~~/composables/useAnalysisFetch'
 import { getSensorTimeseries } from '~~/composables/useSensorTimeseries'
 import { fetchModelTimeseries } from '~~/composables/useModelTimeseries'
-import { availableVariables } from '~~/composables/useAnalysisStatistics'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import { useViewState, useChartZoom } from '~~/composables/useViewState'
@@ -133,7 +132,7 @@ const props = defineProps<{ active?: boolean }>()
 // pairs — emitting them keeps this component the single fetch owner.
 const emit = defineEmits<{ data: [ComparisonPoint[]] }>()
 const mainStore = useMainStore()
-const { displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue, variableLabel } = useVariableRegistry()
 
 // --- STORE-DERIVED STATE ---
 const variable = computed(() => mainStore.selected_variable.var)
@@ -156,7 +155,7 @@ const variableDepthLabel = computed(() => {
 })
 
 const varName = computed(() =>
-  availableVariables.find(v => v.id === variable.value)?.name || variable.value || 'Variable'
+  variable.value ? variableLabel(variable.value) : 'Variable'
 )
 
 const depthLabel = computed(() => {
@@ -236,7 +235,7 @@ async function loadHourly() {
   const byTime = new Map<string, ComparisonPoint>()
   const touch = (t: string) => {
     let p = byTime.get(t)
-    if (!p) { p = { date: t, model: null, modelMin: null, modelMax: null, sensor: null }; byTime.set(t, p) }
+    if (!p) { p = { date: t, model: null, sensor: null }; byTime.set(t, p) }
     return p
   }
   modelResp.time.forEach((t, i) => { touch(t).model = modelResp.value[i] ?? null })
@@ -300,8 +299,6 @@ function renderTimeseriesChart() {
 
   const data = chartData.value
   const modelMean = data.map(p => [p.date, p.model])
-  const modelMin  = data.map(p => [p.date, p.modelMin])
-  const modelMax  = data.map(p => [p.date, p.modelMax])
   const sensor    = data.map(p => [p.date, p.sensor])
 
   tsChart.setOption({
@@ -310,7 +307,7 @@ function renderTimeseriesChart() {
       confine: true,
       formatter: (params: any) => {
         const items = (Array.isArray(params) ? params : [params])
-          .filter((p: any) => !['Model min', 'Model max'].includes(p.seriesName) && p.value?.[1] != null)
+          .filter((p: any) => p.value?.[1] != null)
         if (!items.length) return ''
         const rawDate = items[0]?.axisValue ?? items[0]?.value?.[0]
         const date = rawDate != null ? new Date(rawDate).toISOString().slice(0, 10) : ''
@@ -339,28 +336,6 @@ function renderTimeseriesChart() {
     },
     dataZoom: [{ type: 'inside', ...zoom.current() }, { type: 'slider', bottom: 4, height: 16, ...zoom.current() }],
     series: [
-      {
-        name: 'Model min',
-        type: 'line',
-        data: modelMin,
-        symbol: 'none',
-        lineStyle: { color: '#ff9800', width: 0.8, type: 'dashed', opacity: 0.45 },
-        itemStyle: { color: '#ff9800' },
-        emphasis: { disabled: true },
-        legendHoverLink: false,
-        silent: true,
-      },
-      {
-        name: 'Model max',
-        type: 'line',
-        data: modelMax,
-        symbol: 'none',
-        lineStyle: { color: '#ff9800', width: 0.8, type: 'dashed', opacity: 0.45 },
-        itemStyle: { color: '#ff9800' },
-        emphasis: { disabled: true },
-        legendHoverLink: false,
-        silent: true,
-      },
       {
         name: 'Model (mean)',
         type: 'line',
@@ -424,15 +399,11 @@ async function loadData() {
     const location = { lat: sensorInfo.value.latitude, lon: sensorInfo.value.longitude }
     const base = { variable: variable.value, depth: depth.value, location, yearRange: [firstYear, lastYear] as [number, number] }
 
-    const [meanData, minData, maxData] = await Promise.all([
-      fetchAnalysisSeries({ ...base, stat: 'mean' }),
-      fetchAnalysisSeries({ ...base, stat: 'min' }),
-      fetchAnalysisSeries({ ...base, stat: 'max' }),
-    ])
+    const meanData = await fetchAnalysisSeries(base)
 
     loadingStep.value = 'Processing…'
     const sensorDaily = aggregateSensorToDaily(sensorTimes, sensorValues)
-    rawComparisonData.value = buildComparisonSeries(meanData, minData, maxData, sensorDaily)
+    rawComparisonData.value = buildComparisonSeries(meanData, sensorDaily)
     emit('data', rawComparisonData.value)
     hasData.value = true
     lastLoadedSig = sig

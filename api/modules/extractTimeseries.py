@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from modules.clickhouse_helpers import get_ch_client
+from shared.ssc_schema import SSC_VARIABLES
 
 # ClickHouse table holding the 4D (time, depth, gridX, gridY, <variables>) data per source
 DATA_TABLE_BY_SOURCE = {
@@ -42,16 +43,7 @@ GRID_TABLE_BY_SOURCE = {
 }
 
 # Columns in the data table that hold variable values; also the allowed `var` values
-ALLOWED_VARIABLES = {
-    "temperature",
-    "salinity",
-    "total_alkalinity",
-    "omega_arag",
-    "omega_cal",
-    "ph_total",
-    "dissolved_oxygen",
-    "dissolved_inorganic_carbon",
-}
+ALLOWED_VARIABLES = set(SSC_VARIABLES)
 
 MAX_GRID_DIST_KM = 25.0
 

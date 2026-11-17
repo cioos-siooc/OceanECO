@@ -45,3 +45,11 @@ def test_resolve_nearest_depth_out_of_tolerance_returns_none():
 def test_resolve_nearest_depth_no_data_returns_none():
     fake = FakeClient(depths=[])
     assert _resolve_nearest_depth(fake, 10, 20, 5.0) is None
+
+
+@pytest.mark.parametrize("variable,stat", [("temperature", "min"), ("temperature", "max"),
+                                           ("temperature; DROP TABLE x", "mean")])
+def test_query_region_timeseries_rejects_non_mean_or_unknown(variable, stat):
+    # Daily table stores means only; anything else must 400 (ValueError), not 500.
+    with pytest.raises(ValueError):
+        ocean_analysis.query_region_timeseries([(1, 1)], 0.5, variable, stat, [2020, 2021])

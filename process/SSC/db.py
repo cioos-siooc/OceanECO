@@ -1,7 +1,8 @@
 """ClickHouse client and schema management for the SalishSeaCast pipeline.
 
 Tables managed here:
-  SalishSeaCast_hourly   — raw hourly 4D ocean data
+  SalishSeaCast_hourly   — hourly 4D model data   } DDL in shared/ssc_schema.py
+  SalishSeaCast_daily    — per-cell daily means    }
   SalishSeaCast_status   — one row per (date, variable); status column carries
                            the full combined pipeline state
 
@@ -17,6 +18,8 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import clickhouse_connect
+
+from shared.ssc_schema import daily_sql, hourly_sql
 
 from .config import (
     ALL_VARIABLES, COMPUTE_VARIABLES, DOWNLOAD_VARIABLES,
@@ -66,22 +69,6 @@ def _limit_sql(limit: int) -> str:
 # Schema
 # ---------------------------------------------------------------------------
 
-_VARIABLE_COLS = '\n    '.join(
-    f'{var} Float32 CODEC(Gorilla, ZSTD(4)),' for var in ALL_VARIABLES
-)
-
-_CREATE_HOURLY = f"""
-CREATE TABLE IF NOT EXISTS SalishSeaCast_hourly (
-    time     DateTime  CODEC(DoubleDelta, ZSTD(4)),
-    depth    Float32   CODEC(Gorilla, ZSTD(4)),
-    gridX    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    gridY    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    {_VARIABLE_COLS}
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(time)
-ORDER BY (gridX, gridY, depth, time)
-"""
-
 _CREATE_STATUS = """
 CREATE TABLE IF NOT EXISTS SalishSeaCast_status (
     date          Date     CODEC(DoubleDelta, ZSTD(4)),
@@ -96,31 +83,10 @@ PARTITION BY toYYYYMM(date)
 ORDER BY (date, variable)
 """
 
-# Daily mean/min/max per variable, derived from SalishSeaCast_hourly during
-# ingest (see ingest.py) — same column layout as the historical bulk-load
-# table this feeds, so both the PROCESS
-# machine's local table and the API machine's table stay schema-compatible.
-_DAILY_VARIABLE_COLS = '\n    '.join(
-    f'{var}_{stat} Float32 CODEC(Gorilla, ZSTD(4)),'
-    for var in ALL_VARIABLES for stat in ('mean', 'min', 'max')
-)
-
-_CREATE_DAILY = f"""
-CREATE TABLE IF NOT EXISTS SalishSeaCast_daily (
-    time     Date      CODEC(DoubleDelta, ZSTD(4)),
-    depth    Float32   CODEC(Gorilla, ZSTD(4)),
-    gridX    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    gridY    UInt16    CODEC(DoubleDelta, ZSTD(4)),
-    {_DAILY_VARIABLE_COLS}
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(time)
-ORDER BY (gridX, gridY, time, depth)
-"""
-
 
 def ensure_schema(client) -> None:
-    client.command(_CREATE_HOURLY)
-    client.command(_CREATE_DAILY)
+    client.command(hourly_sql())   # Int32 `_q` columns; see shared/ssc_schema.py
+    client.command(daily_sql())
     client.command(_CREATE_STATUS)
     logger.info('SalishSeaCast ClickHouse schema verified')
 
@@ -194,7 +160,7 @@ def mark_failed(client, date_val: date, variable: str, failed_status: str,
 # ---------------------------------------------------------------------------
 
 def downloads_complete(client, date_val: date) -> bool:
-    """True when all 5 download variables have moved past the download stage."""
+    """True when all download variables have moved past the download stage."""
     past = "', '".join(PAST_DOWNLOAD_STATUSES)
     result = client.query(
         f"""
@@ -229,7 +195,7 @@ def compute_complete(client, date_val: date) -> bool:
 
 
 def images_complete(client, date_val: date) -> bool:
-    """True when all 8 variables are at success_image."""
+    """True when all variables are at success_image."""
     result = client.query(
         """
         SELECT COUNT() FROM SalishSeaCast_status FINAL
@@ -250,7 +216,7 @@ def promote_to_pending_image(client, date_val: date, variable: str, nc_path: str
 
 
 def _promote_all_variables(client, date_val: date, new_status: str) -> None:
-    """Move all 8 variables for date_val to new_status in one bulk insert."""
+    """Move all variables for date_val to new_status in one bulk insert."""
     now = _now()
     rows = [[date_val, var, new_status, '', 0, '', now] for var in ALL_VARIABLES]
     client.insert(
@@ -266,7 +232,7 @@ def _promote_all_variables(client, date_val: date, new_status: str) -> None:
 
 def check_image_ready_for_date(client, date_val: date) -> bool:
     """Single-date variant of check_image_ready: promote date_val to pending_image
-    if all 8 variables have reached their stage's success state. Returns True if
+    if all variables have reached their stage's success state. Returns True if
     promoted, False if not yet ready (a no-op, safe to call repeatedly)."""
     result = client.query(
         f"""
@@ -295,9 +261,9 @@ def check_image_ready_for_date(client, date_val: date) -> bool:
 
 
 def check_image_ready(client, limit: int = 20) -> int:
-    """Find dates where ALL 8 variables have reached their stage's success state
+    """Find dates where ALL variables have reached their stage's success state
     (5 download vars at success_download, 3 compute vars at success_compute) and
-    promote all 8 to pending_image together.
+    promote all to pending_image together.
 
     This is the 'check_image' stage: imaging never starts on a partial date, so a
     date is only ever promoted once, atomically, regardless of whether downloads
@@ -326,7 +292,7 @@ def check_image_ready(client, limit: int = 20) -> int:
 
 
 def _promote_dates_at_status(client, from_status: str, to_status: str, limit: int) -> int:
-    """Find dates where all 8 variables are at from_status and promote them to
+    """Find dates where all variables are at from_status and promote them to
     to_status together. Returns the number of status rows promoted."""
     result = client.query(
         f"""
@@ -349,8 +315,8 @@ def _promote_dates_at_status(client, from_status: str, to_status: str, limit: in
 
 def promote_ready_dates(client, limit: int = 20) -> int:
     """Scan for dates ready to advance and promote them:
-      - fully imaged (all 8 at success_image)  -> pending_ingest
-      - fully ingested (all 8 at success_ingest) -> pending_sync
+      - fully imaged (all at success_image)  -> pending_ingest
+      - fully ingested (all at success_ingest) -> pending_sync
 
     Returns the number of status rows promoted (a multiple of 8).
     """
@@ -399,7 +365,7 @@ def get_pending_downloads(client, limit: int = 20) -> list[tuple[date, str]]:
 
 def get_dates_pending_compute(client, limit: int = 10) -> list[date]:
     """Dates where compute vars are pending_compute (or failed_compute under the
-    retry cap) AND all 5 downloads are done."""
+    retry cap) AND all downloads are done."""
     past = "', '".join(PAST_DOWNLOAD_STATUSES)
     result = client.query(
         f"""

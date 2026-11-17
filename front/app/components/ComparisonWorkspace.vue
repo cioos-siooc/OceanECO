@@ -67,7 +67,6 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useMainStore } from '../stores/main'
-import { availableVariables } from '~~/composables/useAnalysisStatistics'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import {
   filterBySeason,
@@ -99,7 +98,7 @@ const seasonItems = [{ value: 'all', label: 'All' }, { value: 'mam', label: 'MAM
 const isOpen = defineModel<boolean>()
 
 const mainStore = useMainStore()
-const { displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue, variableLabel } = useVariableRegistry()
 const varUnit = computed(() => displayUnit(mainStore.selected_variable.var))
 // Chart readouts (tooltips) round to the selected variable's own precision; the
 // stat cards below keep `fmt`'s 3 decimals, where the extra digits are the point.
@@ -119,7 +118,7 @@ const tabItems = computed(() => [
     { value: 'seasonal', label: 'Seasonal Cycle' },
 ])
 const varName = computed(() =>
-  availableVariables.find(v => v.id === mainStore.selected_variable.var)?.name || mainStore.selected_variable.var || 'Variable')
+  mainStore.selected_variable.var ? variableLabel(mainStore.selected_variable.var) : 'Variable')
 
 type Tab = 'overview' | 'sections' | 'scatter' | 'residuals' | 'seasonal'
 // On the store, not a local ref: a share link restores which comparison tab
@@ -247,8 +246,6 @@ csvExport.register((): CsvDataset[] => {
   const withDifference = (points: typeof rawData.value) => points.map(p => ({
     date: p.date,
     model: p.model,
-    modelMin: p.modelMin,
-    modelMax: p.modelMax,
     sensor: p.sensor,
     difference: (p.model != null && p.sensor != null) ? p.model - p.sensor : null,
   }))
@@ -258,12 +255,7 @@ csvExport.register((): CsvDataset[] => {
     return [{
       label: 'Model vs sensor (daily)',
       slug: 'comparison-daily',
-      columns: [
-        ...pairColumns.slice(0, 2),
-        { header: 'model_min', unit: u, accessorKey: 'modelMin' },
-        { header: 'model_max', unit: u, accessorKey: 'modelMax' },
-        ...pairColumns.slice(2),
-      ],
+      columns: pairColumns,
       rows: withDifference(rawData.value),
       meta: csvMeta(csvContext.value, [
         ['note', 'the full daily record, including days where only one of the two has a value'],

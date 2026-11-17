@@ -4,7 +4,8 @@ services:
   # images get pushed home via the `sync` stage ("process locally, network
   # only at the end").
   db-ch:
-    image: clickhouse/clickhouse-server:latest
+    # Pinned: the cloned data dir was written by this version.
+    image: clickhouse/clickhouse-server:26.5.1.882
     profiles: ["tools"]
     ports:
       - "8123:8123"
@@ -71,7 +72,7 @@ services:
       # attempts failed" errors.
       PREFECT_API_URL: ${PREFECT_API_URL:?set PREFECT_API_URL (e.g. https://pipelines.cioospacific.ca/api) — did you pass --env-file?}
       # The server's basic auth (user:password). Blank sends none.
-      PREFECT_API_AUTH_STRING: ${PREFECT_AUTH_STRING:-}
+      PREFECT_API_AUTH_STRING: ${PREFECT_API_AUTH_STRING:-}
       PREFECT_LOGGING_EXTRA_LOGGERS: SalishSeaCast,nc2tile
       # The container runs as the host UID, whose home isn't writable here, so
       # the default ~/.prefect would fail.

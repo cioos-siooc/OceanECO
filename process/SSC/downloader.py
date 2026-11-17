@@ -16,11 +16,11 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+import netCDF4
 import requests
 
 from .config import (
@@ -167,6 +167,52 @@ def check_erddap(client, init_days: int = 3, date_override: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
+# Compression
+# ---------------------------------------------------------------------------
+
+NC_COMPLEVEL = 4
+NC_CHUNKS = (6, 10, 225, 100)   # (time, depth, gridY, gridX): compute.py's output layout;
+                                # ingest reads 6 hours at a time
+
+
+def compress_nc(src: str, dst: str, complevel: int = NC_COMPLEVEL) -> None:
+    """Copy src (ERDDAP's uncompressed netCDF-3, ~1.4 GB a day) to dst as
+    netCDF-4 with deflate `complevel` + shuffle on 4-D variables, chunked
+    NC_CHUNKS. Values and attributes are copied raw (no decoding), so dst
+    reads exactly like src. Written to dst + '.part', then renamed."""
+    part = dst + '.part'
+    try:
+        _copy_compressed(src, part, complevel)
+    except BaseException:
+        if os.path.exists(part):
+            os.remove(part)
+        raise
+    os.replace(part, dst)
+
+
+def _copy_compressed(src: str, part: str, complevel: int) -> None:
+    with netCDF4.Dataset(src) as si, netCDF4.Dataset(part, 'w', format='NETCDF4') as so:
+        so.setncatts({k: si.getncattr(k) for k in si.ncattrs()})
+        for name, dim in si.dimensions.items():
+            so.createDimension(name, None if dim.isunlimited() else len(dim))
+        for name, v in si.variables.items():
+            v.set_auto_maskandscale(False)
+            fill = v.getncattr('_FillValue') if '_FillValue' in v.ncattrs() else None
+            kw = {}
+            if v.ndim == 4:
+                kw = dict(zlib=True, complevel=complevel, shuffle=True,
+                          chunksizes=[min(c, n) for c, n in zip(NC_CHUNKS, v.shape)])
+            o = so.createVariable(name, v.dtype, v.dimensions, fill_value=fill, **kw)
+            o.set_auto_maskandscale(False)
+            o.setncatts({k: v.getncattr(k) for k in v.ncattrs() if k != '_FillValue'})
+            if v.ndim == 4:
+                for t in range(0, v.shape[0], NC_CHUNKS[0]):
+                    o[t:t + NC_CHUNKS[0]] = v[t:t + NC_CHUNKS[0]]
+            else:
+                o[:] = v[:]
+
+
+# ---------------------------------------------------------------------------
 # Single-variable download
 # ---------------------------------------------------------------------------
 
@@ -205,7 +251,8 @@ def download_variable(client, date_val: date, variable: str) -> bool:
                 for chunk in r.iter_content(8192):
                     if chunk:
                         fh.write(chunk)
-        shutil.move(tmpfn, final_path)
+        compress_nc(tmpfn, final_path)
+        os.remove(tmpfn)
         mark_success(client, date_val, variable, STATUS_SUCCESS_DOWNLOAD,
                      nc_path=final_path, attempts=attempts + 1)
         logger.info('Downloaded %s %s → %s', variable, date_val, final_path)

@@ -66,7 +66,6 @@ import { ref, computed, watch } from 'vue'
 import { useMainStore } from '../stores/main'
 import { fetchAnalysisSeries, type SeriesPoint, type AnalysisLocation } from '~~/composables/useAnalysisFetch'
 import { fetchSensorAnalysisSeries } from '~~/composables/useSensorAnalysisFetch'
-import { availableVariables } from '~~/composables/useAnalysisStatistics'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import { csvMeta, provideCsvExport, type CsvContext, type CsvDataset } from '~~/composables/useCsvExport'
 import { sensorSourceUrl } from '~~/composables/useSensorDownloadLinks'
@@ -105,7 +104,7 @@ const sensorInfo = computed(() => mainStore.sensors.find(s => s.id === mainStore
 watch(hasSensor, (has) => { if (!has && source.value === 'sensor') mainStore.setAnalysisSource('model') })
 
 const variable = computed(() => mainStore.selected_variable.var)
-const varName = computed(() => availableVariables.find(v => v.id === variable.value)?.name || variable.value || 'Variable')
+const varName = computed(() => variable.value ? variableLabel(variable.value) : 'Variable')
 
 const isVariableDepth = computed(() => sensorInfo.value?.depth === -1)
 const depth = computed(() => {
@@ -150,7 +149,7 @@ const selectedSeason = computed<string>({
 // The workspace owns the query (point/sensor, variable, depth, window) so it
 // provides the context; each deep-dive tab registers the files it can produce
 // and the single header button offers whatever the active tab registered.
-const { displayUnit } = useVariableRegistry()
+const { displayUnit, variableLabel } = useVariableRegistry()
 
 /** '49.283N 123.121W' — hemisphere letters keep the sign out of filenames. */
 function formatLatLon(lat: number, lon: number) {
@@ -197,7 +196,7 @@ function fetchSeriesFor(variableId: string, depthVal: number, loc: AnalysisLocat
     return fetchSensorAnalysisSeries(loc.sensorId, variableId, 'mean', depthVal, from, to,
       isVariableDepth.value ? mainStore.selected_variable.source : null)
   }
-  return fetchAnalysisSeries({ variable: variableId, stat: 'mean', depth: depthVal, location: loc, yearRange: yearRange.value })
+  return fetchAnalysisSeries({ variable: variableId, depth: depthVal, location: loc, yearRange: yearRange.value })
 }
 
 async function fetchPrimary() {

@@ -10,9 +10,9 @@ export type AnalysisLocation =
     | { polygon: [number, number][] }
     | { sensorId: string };
 
+// No `stat`: SalishSeaCast_daily stores daily means only (the API rejects min/max).
 export type AnalysisFetchParams = {
     variable: string;
-    stat: 'min' | 'mean' | 'max';
     depth: number;
     location: AnalysisLocation;
     yearRange: [number, number];
@@ -30,7 +30,7 @@ export async function fetchAnalysisSeries(params: AnalysisFetchParams): Promise<
 
     const body = {
         depth: params.depth,
-        primaryMetric: { variable: params.variable, stat: params.stat },
+        primaryMetric: { variable: params.variable, stat: 'mean' },
         temporal: { yearRange: params.yearRange },
         ...params.location,
     };

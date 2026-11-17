@@ -4,7 +4,7 @@ Calls nc2tile for each variable to reproject the curvilinear NetCDF grid into
 Web Mercator WebP tiles for the Mapbox frontend.
 
 Picks up variables at pending_image status (set by db.check_image_ready() once
-all 8 variables for a date have succeeded download/compute).  After success,
+all variables for a date have succeeded download/compute).  After success,
 marks success_image.  Call db.promote_ready_dates() afterwards to advance
 fully-imaged dates to pending_ingest.
 """
@@ -80,7 +80,10 @@ def image_variable(
     workers: Optional[int] = None,
     nc_base_dir: str = NC_BASE_DIR,
     image_base_dir: str = IMAGE_BASE_DIR,
+    surface_only: bool = False,
 ) -> bool:
+    """Render a variable-day's WebP tiles: every depth plus the companion
+    bottom layer, or only the first (surface) depth when surface_only."""
     # nc2tile reads its output root from this env var (no CLI flag is exposed for it).
     os.environ['IMAGE_ROOT'] = image_base_dir
     src = _nc_path(variable, date_val, nc_base_dir)
@@ -101,6 +104,8 @@ def image_variable(
         precision = VARIABLE_PRECISION.get(variable, 0.1)
 
         depth_indices, depth_labels = _get_all_depths(src)
+        if surface_only:
+            depth_indices, depth_labels = depth_indices[:1], depth_labels[:1]
         args = [
             '--data', src,
             '--vars', variable,
@@ -119,7 +124,7 @@ def image_variable(
 
         # Process companion bottom-layer file if present
         bottom_src = _bottom_nc_path(src)
-        if os.path.exists(bottom_src):
+        if not surface_only and os.path.exists(bottom_src):
             bottom_args = [
                 '--data', bottom_src, '--vars', variable,
                 '--precision', str(precision),
@@ -163,3 +168,35 @@ def process_pending_images(
     for date_val, variable in pending:
         image_variable(client, date_val, variable, workers=workers,
                        nc_base_dir=nc_base_dir, image_base_dir=image_base_dir)
+
+
+# ---------------------------------------------------------------------------
+# Daily surface tiles (from the ingested daily means)
+# ---------------------------------------------------------------------------
+
+DAILY_TILE_DEPTH = 0.5
+
+
+def image_daily_surface(date_val: date, image_base_dir: str = IMAGE_BASE_DIR) -> int:
+    """Render {var}/{YYYY-MM-DD}/0.5.webp for every variable from date_val's
+    SalishSeaCast_daily rows, so the map's daily view of recent dates doesn't
+    wait for the API's on-demand renderer (which still covers other depths).
+    Run after ingest, before sync (sync deletes the local rows). Never raises:
+    a missing tile is only slower to view. Returns the number written."""
+    nc2tile = _get_nc2tile()
+    label = f'{DAILY_TILE_DEPTH:.1f}'
+    written = 0
+    for var in ALL_VARIABLES:
+        try:
+            out = nc2tile.render_tile_from_db(
+                variable=var, bin_mode='daily', time_param=date_val, depth=DAILY_TILE_DEPTH,
+                depth_label=label, dt_folder=date_val.isoformat(), image_root=image_base_dir)
+        except Exception:
+            logger.exception('Daily surface tile failed: %s %s', var, date_val)
+            continue
+        if out is None:
+            logger.warning('Daily surface tile: no %s data on %s', var, date_val)
+        else:
+            written += 1
+    logger.info('Daily surface tiles for %s: %d/%d written', date_val, written, len(ALL_VARIABLES))
+    return written
