@@ -89,7 +89,7 @@ Entry: `process/SSC/cli.py`. Each file/day-variable is a row in `SalishSeaCast_s
 pending_download → downloading → success_download → pending_compute → computing → success_compute
   → pending_image → imaging → success_image → pending_ingest → success_ingest → pending_sync → success_sync
 ```
-- `SSC/downloader.py` — ERDDAP fetching with backfill: 8 variables from the physics, chemistry and biology (nitrate, diatoms, flagellates) datasets
+- `SSC/downloader.py` — ERDDAP fetching with backfill: 8 variables from the physics, chemistry and biology (nitrate, diatoms, flagellates) datasets. `compress_nc` stores each as netCDF-4 (deflate 4 + shuffle, chunks 6 h × 10 × 225 × 100, like compute.py's output): ~0.18 GB a day instead of 1.4. NC files are kept; sync deletes only local images and Native exports
 - `SSC/compute.py` — derived variables (pH, Ω aragonite/calcite) via PyCO2SYS
 - `SSC/imaging.py` — hourly WebP tiles from NC via `nc2tile.py`; `image_daily_surface` renders `{var}/{date}/0.5.webp` from the date's daily rows
 - `SSC/ingest.py` — one date's NC → `_q` rows in both tables, then the daily surface tiles. Reads 6 hours at a time and inserts Native blocks built from numpy (clickhouse-connect's `insert_df` boxes nullable ints: ~19 GB a day). Replaces the date's existing rows, so reruns are safe. ~90 s, ~5 GB a day

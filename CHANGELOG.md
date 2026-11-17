@@ -34,6 +34,8 @@ git tags; the dates below are the last commit on each version branch.
   API in `shared/ssc_schema.py`.
 - **Ingest rewritten** — block reads and Native inserts (~90 s, ~5 GB a day); rerunning a
   date replaces its rows instead of duplicating them. Sync exports stream to disk.
+- **Compressed downloads** — ERDDAP NetCDF is stored as netCDF-4 deflate 4 (lossless,
+  ~8× smaller).
 - **Climatology** — min/max are now the range of daily means across years, computed on the
   fly from the daily table.
 - **Variable-aware value rounding** — `formatDisplayValue()` is now the single rounding
