@@ -1328,8 +1328,12 @@ function onPngSourceSettled(e: any) {
     // A failed load (e.g. a 404 for a date with no data) leaves the previous
     // image in place, which would pass the old date's field off as this one.
     // Hide the layer until a load succeeds.
-    if (map?.getLayer('png-image-layer')) {
-        map.setPaintProperty('png-image-layer', 'raster-opacity', e.type === 'error' ? 0 : 1);
+    // Only an HTTP failure for the URL currently requested counts — an error
+    // from a superseded request must not hide the image that replaced it.
+    const failedUrl = e?.error?.url;
+    const failedCurrent = e.type === 'error' && (!failedUrl || failedUrl === src.url);
+    if (map?.getLayer('png-image-layer') && (e.type !== 'error' || failedCurrent)) {
+        map.setPaintProperty('png-image-layer', 'raster-opacity', failedCurrent ? 0 : 1);
     }
     endMapLayerLoad(src.url);
 }
