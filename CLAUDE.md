@@ -13,6 +13,7 @@ Host ports come from `docker-compose.dev.yml`'s `${VAR:-default}` fallbacks, ove
 | `db-ch` | ClickHouse | 9013 (HTTP), 9014 (native) |
 | `process` | Data pipeline worker (the CLI) — dev only | — |
 | `scheduler` | Prod only (`docker-compose.prod.process.yml`): `process` image serving `SSC/flows.py` to Prefect; the only pipeline container there | — |
+| `tunnel` | Prod only (`docker-compose.prod.api.yml`): cloudflared, the API's only public ingress (`CLOUDFLARE_TUNNEL_TOKEN`; dashboard hostname → `http://api:4000`); `api`'s host port is loopback-only | — |
 | `sensors-scheduler` | Prod only (`docker-compose.prod.api.yml`): `sensors` image serving `sensors/flows.py` (hourly ERDDAP/ONC ingestion) | — |
 
 Prefect is **prod-only**: both schedulers report to the shared https://pipelines.cioospacific.ca (the [cioos-pacific-pipeline](https://github.com/cioos-siooc/cioos-pacific-pipeline) stack; our flows are served by our own containers, not its `pipelines` work pool). Dev has no Prefect server or schedulers — run the CLI instead.

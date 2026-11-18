@@ -4,8 +4,9 @@ Packages are installed system-wide inside the container.
 ## Cloudflare Tunnel (public ingress)
 
 The API machine (API + ClickHouse) sits behind a firewall and isn't publicly
-reachable. A system-level `cloudflared` tunnel exposes the `api` container's
-`localhost:9011` publicly so:
+reachable. The `tunnel` service in `docker-compose.prod.api.yml` (cloudflared,
+token in `CLOUDFLARE_TUNNEL_TOKEN`) is its only public ingress; the `api`
+container's host port is bound to `127.0.0.1`. It serves:
 
 - the frontend can reach the API for every request, and
 - the PROCESS machine can call `POST /admin/syncHourly` after rsyncing a
@@ -13,28 +14,18 @@ reachable. A system-level `cloudflared` tunnel exposes the `api` container's
   SSH tunnel/Cloudflare Access app under a different Cloudflare account — see
   `process/README.md` / `SSC/sync.py`'s `cloudflared access ssh` usage).
 
-This tunnel runs as its own systemd service, independent of
-`docker-compose.prod.api.yml` — so `docker compose down`/redeploys of the app
-stack don't take down public ingress, and vice versa.
-
-**Service name:** `cloudflared-api-oceaneco.service`
+The tunnel is remotely managed: its public hostname's service is set in the
+Cloudflare dashboard and must be `http://api:4000` (the compose service name —
+`localhost` points at the cloudflared container itself).
 
 ```bash
-# start / stop
-sudo systemctl start cloudflared-api-oceaneco
-sudo systemctl stop cloudflared-api-oceaneco
-
-# enable on boot (should already be enabled)
-sudo systemctl enable cloudflared-api-oceaneco
-
-# check status
-sudo systemctl status cloudflared-api-oceaneco
-
-# tail logs
-journalctl -u cloudflared-api-oceaneco -f
+docker compose -f docker-compose.prod.api.yml --env-file .env up -d tunnel
+docker compose -f docker-compose.prod.api.yml --env-file .env logs -f tunnel
 ```
 
-If it's crash-looping, run the `ExecStart` command from
-`/etc/systemd/system/cloudflared-api-oceaneco.service` directly in the
-foreground as the service's user — systemd's journal often truncates the
-actual `cloudflared` error above the restart-loop noise.
+It replaces the old host systemd unit `cloudflared-api-oceaneco.service`.
+Once the container's connections show as healthy in the dashboard, retire it
+(`sudo systemctl disable --now cloudflared-api-oceaneco`) — a second connector
+with the same token joins as a replica, and the systemd one points at
+`localhost:$API_PORT`, which still works, so a forgotten unit silently keeps
+serving traffic.

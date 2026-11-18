@@ -51,6 +51,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # === Downloaded Data ===
+DATA/
 data/
 data.b/
 data.tar.gz

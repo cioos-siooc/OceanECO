@@ -4,8 +4,11 @@ services:
       context: .
       dockerfile: api/Dockerfile
     user: "${UID:-1000}:${GID:-1000}"
+    # Public traffic reaches the API only through the `tunnel` service below
+    # (http://api:4000 on the compose network). The host port is bound to
+    # loopback for on-box debugging (curl localhost:$API_PORT/health) only.
     ports:
-      - "${API_PORT:-4000}:4000"
+      - "127.0.0.1:${API_PORT:-4000}:4000"
     volumes:
       - ./shared:/app/shared
       - /home/cioos/OA_data:/opt/data
@@ -44,6 +47,21 @@ services:
     depends_on:
       db-ch:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Cloudflare Tunnel — the API's only public ingress (frontend requests and
+  # the PROCESS machine's POST /admin/sync*). Remotely-managed tunnel: the
+  # public hostname's service is set in the Cloudflare dashboard (Zero Trust →
+  # Networks → Tunnels → Public hostnames) and must be http://api:4000 — the
+  # compose service name, not localhost. Replaces the host systemd unit
+  # cloudflared-api-oceaneco.service; run only one, or both connect as replicas.
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN (Cloudflare dashboard → the tunnel → Install connector) — did you pass --env-file?}
+    depends_on:
+      - api
     restart: unless-stopped
 
   # Sensor ingestion — fetches from ONC/ERDDAP and writes directly to db-ch.
