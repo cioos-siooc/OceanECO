@@ -53,7 +53,7 @@ All colormaps from `shared/colormaps.json`, sorted by `name`.
 
 ### `GET /png/{source}/{var}/{dt}/{depth}`
 Serves a preprocessed WebP/PNG tile. `source` must be `SalishSeaCast` (else 400). Searches
-`SSC_IMAGE_DIR` (+ optional `SSC_IMAGE_DIR_ARCHIVE`), tries `.webp` then `.png`. **Never generates
+`SSC_IMAGE_DIR`, tries `.webp` then `.png`. **Never generates
 on demand** — 404 if the file doesn't exist. Immutable cache headers.
 
 ### `GET /vector/{z}/{x}/{y}.pbf`

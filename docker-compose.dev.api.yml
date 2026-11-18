@@ -10,17 +10,8 @@ services:
       - ./api:/app
       - ./shared:/app/shared
       - /home/cioos/OA_data:/opt/data
-      # Optional deep-archive mount (older data outside the normal retention
-      # window) — uncomment and set ARCHIVE_DIR once this machine actually
-      # has that storage; SSC_*_ARCHIVE below are no-ops without it.
-      # - ${ARCHIVE_DIR}:/opt/archive
     environment:
-      - SSC_NC_DIR=${SSC_NC_DIR:-/opt/data/SSC/nc}
-      - SSC_NC_DIR_ARCHIVE=${SSC_NC_DIR_ARCHIVE:-/opt/archive/SSC/nc}
       - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
-      - SSC_IMAGE_DIR_ARCHIVE=${SSC_IMAGE_DIR_ARCHIVE:-/opt/archive/SSC/images}
-      - LO_NC_DIR=${LO_NC_DIR:-/opt/data/LO/nc}
-      - LO_IMAGE_DIR=${LO_IMAGE_DIR:-/opt/data/LO/images}
       # ClickHouse: local docker-compose instance (db-ch below) by default
       - CH_HOST=${CH_HOST:-db-ch}
       - CH_PORT=${CH_PORT:-8123}

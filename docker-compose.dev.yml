@@ -34,8 +34,6 @@ services:
     env_file:
       - .env.dev
     environment:
-      - HDF5_USE_FILE_LOCKING=FALSE
-      - SSC_NC_DIR=${SSC_NC_DIR:-/opt/data/SSC/nc}
       - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
       # ClickHouse: local docker-compose instance (db-ch service) by default
       - CH_HOST=${CH_HOST:-db-ch}

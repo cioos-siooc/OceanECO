@@ -113,20 +113,11 @@ SSC_IMAGE_DIR = os.environ.get("SSC_IMAGE_DIR", "/opt/data/SalishSeaCast/images"
 
 
 def _get_image_roots(source: str) -> list:
-    """Return list of image root directories to search when serving tiles.
+    """Return the image root directories to search when serving tiles.
 
-    Searches SSC_IMAGE_DIR and its optional archive counterpart. All
-    directories are searched in order when looking up a tile file.
-    SalishSeaCast is the only supported source.
+    SalishSeaCast (SSC_IMAGE_DIR) is the only supported source.
     """
-    roots = []
-    if(source == "SalishSeaCast"):
-        roots = [SSC_IMAGE_DIR]
-        archive_ssc = os.getenv("SSC_IMAGE_DIR_ARCHIVE", "")
-        if archive_ssc:
-            roots.append(archive_ssc)
-
-    return [r for r in roots if r]
+    return [SSC_IMAGE_DIR] if source == "SalishSeaCast" and SSC_IMAGE_DIR else []
 
 
 
@@ -505,8 +496,8 @@ async def get_png(source: str, var: str, dt: str, depth: str):
                 return _png_file_response(full_path)
 
     # Not pre-generated — try rendering it on demand from ClickHouse. Writes
-    # into the first (primary, non-archive) image root so it's found by the
-    # fast path above on every later request.
+    # into the image root so it's found by the fast path above on every
+    # later request.
     generated_path = None
     async with extract_slot("get_png"):
         try:
