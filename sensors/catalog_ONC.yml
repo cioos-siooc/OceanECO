@@ -178,10 +178,31 @@ sensors:
     location_code: PVIP
     source_link: "https://data.oceannetworks.ca/DataSearch?location=PVIP"
     variables:
+      # All on the platform (84–99 m). The Sea-Bird CTD (C1) and the Sea-Bird
+      # (O2) and RINKO (O3) optodes run 2006/2010 to now; C2, C3 and O1 ended
+      # by 2019, and the ADCP's temperature is 2006 only. Optode and current
+      # meter housing temperatures are left out.
+      dissolved_oxygen:
+        unit: ml/L
+        factor: 44.66
+        sources:
+        - PVIP.O2/OXYSENSOR/oxygen_corrected
+        - PVIP.O3/OXYSENSOR/oxygen_corrected
+        - PVIP.O1/OXYSENSOR/oxygen_corrected
+      salinity:
+        unit: PSU
+        factor: 1.0
+        sources:
+        - PVIP.C1/CTD/salinity
+        - PVIP.C2/CTD/salinity
       temperature:
         unit: C
         factor: 1.0
-        sources: [PVIP/ADCP300KHZ/temperature]
+        sources:
+        - PVIP.C1/CTD/temperature
+        - PVIP.C2/CTD/temperature
+        - PVIP.C3/CTD/temperature
+        - PVIP/ADCP300KHZ/temperature
 
   - name: "Cambridge Bay Underwater Network"
     lat: 69.113063
