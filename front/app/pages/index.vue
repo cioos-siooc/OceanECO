@@ -1325,6 +1325,12 @@ function onPngSourceSettled(e: any) {
     const src = map?.getSource('png-image') as any;
     if (!src) return;
     if (e.type === 'sourcedata' && !src.loaded?.()) return;
+    // A failed load (e.g. a 404 for a date with no data) leaves the previous
+    // image in place, which would pass the old date's field off as this one.
+    // Hide the layer until a load succeeds.
+    if (map?.getLayer('png-image-layer')) {
+        map.setPaintProperty('png-image-layer', 'raster-opacity', e.type === 'error' ? 0 : 1);
+    }
     endMapLayerLoad(src.url);
 }
 

@@ -27,6 +27,7 @@ import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme';
 import { computeNightRanges } from '~~/composables/useSunCalc';
 import moment from 'moment-timezone';
 import { APP_TIMEZONE } from '@/config/app';
+import { floorToBin } from '~~/composables/useTimeDepthWindow';
 import colors from '@/config/palette';
 import timeseriesChartHelpImg from '../../public/timeseriesChartHelp.png';
 
@@ -348,9 +349,7 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
         }
     }
 
-    const selectedXLocal = mainStore.selected_variable.dt
-        ? moment.utc(mainStore.selected_variable.dt).tz(tz).format()
-        : null;
+    const selectedXLocal = mapLineX(mainStore.selected_variable.dt);
 
     // Determine y-axis decimal precision from data range
     const axisDecimals = (() => {
@@ -647,6 +646,16 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
     }
 }
 
+// The MAP marker's x. Daily/monthly points sit at their bin start, so the
+// marker snaps there too; otherwise an hourly instant (e.g. 23:30 of the last
+// day) draws it most of a bin past the point the map is actually showing.
+function mapLineX(dt: any): string | null {
+    if (!dt) return null;
+    const mode = props.binMode ?? 'hourly';
+    const t = mode === 'hourly' ? moment.utc(dt).toDate() : floorToBin(moment.utc(dt).toDate(), mode);
+    return moment.utc(t).tz(APP_TIMEZONE).format();
+}
+
 // Update only the vertical "Map" marker when selected dt changes (no full re-plot)
 watch(() => mainStore.selected_variable.dt, (newDt) => {
     if (!chart) return;
@@ -657,7 +666,7 @@ watch(() => mainStore.selected_variable.dt, (newDt) => {
     const plotted = (chart.getOption()?.series as any[]) || [];
     if (!plotted.some((s: any) => s?.name === 'Day/Night')) return;
     const tz = APP_TIMEZONE;
-    const sel = newDt ? moment.utc(newDt).tz(tz).format() : null;
+    const sel = mapLineX(newDt);
     try {
         chart.setOption({
             series: [{

@@ -449,13 +449,15 @@ async def get_cross_section(request: crossSectionRequest):
 
 def _png_file_response(full_path: str) -> FileResponse:
     ext = os.path.splitext(full_path)[1]
+    # Not immutable: a tile can be re-rendered in place (re-ingest, a deleted
+    # bad tile regenerated on demand), so browsers must revalidate. The ETag
+    # FileResponse derives from mtime+size changes whenever the file does.
     headers = {
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": "public, max-age=3600",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Allow-Headers": "*",
         "Vary": "Origin",
-        "ETag": f'"{full_path}-v1"',
     }
     media_type = "image/webp" if ext == '.webp' else "image/png"
     return FileResponse(full_path, media_type=media_type, headers=headers)

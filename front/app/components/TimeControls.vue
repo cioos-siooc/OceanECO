@@ -169,10 +169,12 @@ function stepCoarse(dir: 1 | -1) {
   const cur = selectedDatetime.value;
   if (!cur) return false
   const next = addBins(floorToBin(cur.toDate(), binMode.value), dir, binMode.value);
-  // Forward-only cap at "now" — there's nothing to play into past today.
-  // Backward is intentionally open-ended: daily/monthly reach back up to two
-  // decades and there's no cheap coverage bound available here to clamp to.
-  if (dir > 0 && next.getTime() > floorToBin(new Date(), binMode.value).getTime()) return false
+  // Forward-only cap at the newest synced day (the last hourly timestamp's
+  // bin; daily rows are synced with the same dates), not "now" — today has no
+  // data, so its tile 404s. Backward is intentionally open-ended: daily/monthly
+  // reach back up to two decades and there's no cheap coverage bound here.
+  const last = dts.value?.length ? new Date(Math.max(...dts.value)) : new Date();
+  if (dir > 0 && next.getTime() > floorToBin(last, binMode.value).getTime()) return false
   mainStore.updateSelectedVariable({ dt: moment.utc(next) });
   return true
 }
