@@ -383,20 +383,27 @@ def cmd_rebuild_hourly(args) -> None:
 
 def _sync_date(client, date_val, force=False, image_dir=None) -> None:
     from .sync import sync_date
-    from .config import ALL_VARIABLES, IMAGE_BASE_DIR, STATUS_SUCCESS_SYNC
+    from .config import (
+        ALL_VARIABLES, IMAGE_BASE_DIR, STATUS_FAILED_SYNC, STATUS_PENDING_SYNC,
+        STATUS_SUCCESS_SYNC, STATUS_SYNCING,
+    )
     from .db import get_row
     image_dir = image_dir or os.getenv('SSC_IMAGE_DIR', IMAGE_BASE_DIR)
 
     if not force:
-        already = [
-            var for var in ALL_VARIABLES
-            if (row := get_row(client, date_val, var)) and row['status'] == STATUS_SUCCESS_SYNC
-        ]
+        statuses = {var: (get_row(client, date_val, var) or {}).get('status') for var in ALL_VARIABLES}
+        already = [v for v, s in statuses.items() if s == STATUS_SUCCESS_SYNC]
         if already:
             logger.info('Skipping sync for %s — already synced (%d/%d vars at %s); '
                         'use --force to override', date_val, len(already), len(ALL_VARIABLES),
                         STATUS_SUCCESS_SYNC)
             return
+        # Only sync a fully ingested date: otherwise the export is empty or
+        # partial, and a "successful" sync would delete the local images.
+        ready = {STATUS_PENDING_SYNC, STATUS_FAILED_SYNC, STATUS_SYNCING}
+        not_ready = sorted(f'{v}={s}' for v, s in statuses.items() if s not in ready)
+        if not_ready:
+            raise PipelineError(f'Not ready to sync {date_val}: {", ".join(not_ready)}')
 
     sync_date(client, date_val, image_base_dir=image_dir)
 

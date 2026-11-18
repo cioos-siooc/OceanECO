@@ -24,7 +24,7 @@ from shared.ssc_schema import daily_sql, hourly_sql
 from .config import (
     ALL_VARIABLES, COMPUTE_VARIABLES, DOWNLOAD_VARIABLES,
     CH_HOST, CH_PASSWORD, CH_PORT, CH_REMOTE_URL, CH_USE_REMOTE, CH_USER,
-    MAX_RETRY_ATTEMPTS, PAST_DOWNLOAD_STATUSES,
+    MAX_RETRY_ATTEMPTS, PAST_COMPUTE_STATUSES, PAST_DOWNLOAD_STATUSES,
     STATUS_FAILED_COMPUTE, STATUS_FAILED_DOWNLOAD, STATUS_FAILED_IMAGE,
     STATUS_FAILED_INGEST, STATUS_FAILED_SYNC,
     STATUS_IMAGING, STATUS_INGESTING,
@@ -176,12 +176,9 @@ def downloads_complete(client, date_val: date) -> bool:
 
 def compute_complete(client, date_val: date) -> bool:
     """True when all 3 compute variables have reached success_compute or later."""
-    past_compute = (
-        STATUS_SUCCESS_IMAGE, STATUS_PENDING_IMAGE, STATUS_IMAGING,
-        STATUS_PENDING_INGEST, STATUS_INGESTING,
-        'success_compute', 'success_ingest',
-    )
-    statuses = "', '".join(past_compute)
+    # PAST_COMPUTE_STATUSES includes failed_image/failed_ingest, so a failed
+    # ingest can be retried.
+    statuses = "', '".join(PAST_COMPUTE_STATUSES)
     result = client.query(
         f"""
         SELECT COUNT() FROM SalishSeaCast_status FINAL
