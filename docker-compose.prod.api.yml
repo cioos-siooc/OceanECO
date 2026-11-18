@@ -51,6 +51,10 @@ services:
     command: ["tunnel", "--no-autoupdate", "run"]
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN (Cloudflare dashboard → the tunnel → Install connector) — did you pass --env-file?}
+    # Lets the SSH route (oceaneco-ssh → ssh://host.docker.internal:22) reach
+    # the host's sshd; `localhost` here is this container, which has none.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - api
     restart: unless-stopped
