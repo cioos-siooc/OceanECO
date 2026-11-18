@@ -11,7 +11,7 @@ services:
       - "127.0.0.1:${API_PORT:-4000}:4000"
     volumes:
       - ./shared:/app/shared
-      - /home/cioos/OA_data:/opt/data
+      - ${DATA_DIR:-/home/cioos/OA_data}:/opt/data
     environment:
       - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
       # Bathymetry contour vector tiles (GET /vector/{z}/{x}/{y}.pbf), built by

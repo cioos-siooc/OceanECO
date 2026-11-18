@@ -9,7 +9,7 @@ services:
     volumes:
       - ./api:/app
       - ./shared:/app/shared
-      - /home/cioos/OA_data:/opt/data
+      - ${DATA_DIR:-/home/cioos/OA_data}:/opt/data
     environment:
       - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
       # ClickHouse: local docker-compose instance (db-ch below) by default
