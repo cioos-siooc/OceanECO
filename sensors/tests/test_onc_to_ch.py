@@ -2,7 +2,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from onc_to_ch import PROFILER_CHUNK_DAYS, bin_profile, floor_to_bin, plan_windows, variable_sources
+from onc_to_ch import (PROFILER_CHUNK_DAYS, bin_profile, deployed_during, floor_to_bin, plan_windows,
+                       profiler_groups, variable_sources)
 
 
 def test_floor_to_bin_drops_to_the_hour():
@@ -71,3 +72,25 @@ def test_variable_sources_keeps_priority_order():
 
 def test_variable_sources_empty_for_pre_sources_device_config():
     assert variable_sources({"locationCode": "SCVIP", "codes": [{"deviceCategoryCode": "CTD"}]}) == {}
+
+
+def test_profiler_groups_takes_every_source_on_the_package():
+    sources = {
+        "dissolved_oxygen": [("YPVPP.O1", "OXYSENSOR", "oxygen_corrected"),
+                             ("YPVPP.O2", "OXYSENSOR", "oxygen_corrected")],
+        "temperature": [("YPVPP", "CTD", "temperature")],
+        "salinity": [("YPVPP", "CTD", "salinity"), ("YPVPPX", "CTD", "salinity")],  # not a child
+    }
+    assert profiler_groups(sources, "YPVPP") == {
+        ("YPVPP.O1", "OXYSENSOR"): {"oxygen_corrected": ["dissolved_oxygen"]},
+        ("YPVPP.O2", "OXYSENSOR"): {"oxygen_corrected": ["dissolved_oxygen"]},
+        ("YPVPP", "CTD"): {"temperature": ["temperature"], "salinity": ["salinity"]},
+    }
+
+
+def test_deployed_during_is_half_open_and_handles_open_ended():
+    deps = [(datetime(2025, 1, 1), datetime(2025, 2, 1)), (datetime(2026, 1, 1), None)]
+    assert deployed_during(deps, datetime(2025, 1, 25), datetime(2025, 2, 5))
+    assert not deployed_during(deps, datetime(2025, 2, 1), datetime(2025, 12, 31))
+    assert deployed_during(deps, datetime(2030, 1, 1), datetime(2030, 1, 8))
+    assert not deployed_during([], datetime(2025, 1, 1), datetime(2025, 1, 8))

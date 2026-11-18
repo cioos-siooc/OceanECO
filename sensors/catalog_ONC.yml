@@ -596,6 +596,12 @@ sensors:
     location_code: YPVPP
     source_link: "https://data.oceannetworks.ca/DataSearch?location=YPVPP"
     variables:
+      dissolved_oxygen:
+        unit: ml/L
+        factor: 44.66
+        sources:
+        - YPVPP.O1/OXYSENSOR/oxygen_corrected
+        - YPVPP.O2/OXYSENSOR/oxygen_corrected
       salinity:
         unit: PSU
         factor: 1.0

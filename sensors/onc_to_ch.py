@@ -165,11 +165,35 @@ def plan_windows(deployments: list[tuple[datetime, datetime | None]],
     return windows
 
 
-def get_deployments(location_code: str) -> list[tuple[datetime, datetime | None]]:
-    """(begin, end) of every depth-device deployment at the location; end is
-    None for the one still in the water."""
+def deployed_during(deployments: list[tuple[datetime, datetime | None]],
+                    start: datetime, stop: datetime) -> bool:
+    """Whether any deployment overlaps [start, stop)."""
+    return any(begin < stop and (end is None or end > start) for begin, end in deployments)
+
+
+def profiler_groups(sources: dict[str, list[tuple[str, str, str]]],
+                    location_code: str) -> dict[tuple[str, str], dict[str, list[str]]]:
+    """{(locationCode, deviceCategoryCode): {sensor code: [canonical]}} for a
+    profiler's sources: every source of every variable, at the profiler's
+    location or a child of it (an instrument on the package, e.g. YPVPP.O1) —
+    anything else can't be paired with the package's CTD depth."""
+    groups: dict[tuple[str, str], dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for canonical, srcs in sources.items():
+        for loc, cat, code in srcs:
+            if loc != location_code and not loc.startswith(location_code + "."):
+                print(f"  '{canonical}': source {loc} isn't on the profiler {location_code}, skipping")
+                continue
+            groups[(loc, cat)][code].append(canonical)
+    return {g: dict(by_code) for g, by_code in groups.items()}
+
+
+def get_deployments(location_code: str, device_category: str = DEPTH_DEVICE_CATEGORY
+                    ) -> list[tuple[datetime, datetime | None]]:
+    """(begin, end) of every deployment of the device category at the
+    location (by default the depth device); end is None for the one still in
+    the water."""
     deps = onc.getDeployments({"locationCode": location_code,
-                               "deviceCategoryCode": DEPTH_DEVICE_CATEGORY}) or []
+                               "deviceCategoryCode": device_category}) or []
     return [(dt_to_naive_utc(d["begin"]), dt_to_naive_utc(d["end"]) if d.get("end") else None)
             for d in deps if d.get("begin")]
 
@@ -177,17 +201,23 @@ def get_deployments(location_code: str) -> list[tuple[datetime, datetime | None]
 def fetch_profiler_window(location_code: str, device_category: str, codes: list[str],
                           start: datetime, stop: datetime) -> dict[str, list[tuple[datetime, float]]]:
     """{sensor code: [(time, value)]} for one device category over [start, stop),
-    NaN/missing samples dropped."""
-    data = onc.getScalardataByLocation({
-        "locationCode": location_code,
-        "deviceCategoryCode": device_category,
-        "sensorCategoryCodes": ",".join(codes),
-        "resamplePeriod": PROFILER_RESAMPLE_SECONDS,
-        "resampleType": "avg",
-        "qualityControl": "clean",
-        "dateFrom": onc_time_str(start),
-        "dateTo": onc_time_str(stop),
-    }, allPages=True)
+    NaN/missing samples dropped. Empty when nothing was deployed there in the
+    window."""
+    try:
+        data = onc.getScalardataByLocation({
+            "locationCode": location_code,
+            "deviceCategoryCode": device_category,
+            "sensorCategoryCodes": ",".join(codes),
+            "resamplePeriod": PROFILER_RESAMPLE_SECONDS,
+            "resampleType": "avg",
+            "qualityControl": "clean",
+            "dateFrom": onc_time_str(start),
+            "dateTo": onc_time_str(stop),
+        }, allPages=True)
+    except Exception as e:
+        if ONC_NOT_DEPLOYED in str(e):
+            return {}
+        raise
     series: dict[str, list[tuple[datetime, float]]] = {}
     for s in data.get("sensorData") or []:
         pts = []
@@ -321,35 +351,36 @@ def store_sensor(ch_client, sensor: dict, date_to: str):
 def store_profiler(ch_client, sensor: dict, location_code: str,
                    sources: dict[str, list[tuple[str, str, str]]], date_to: str):
     """store_sensor for a variable-depth sensor: every variable at the CTD's
-    measured depth, binned by bin_profile(). Only each variable's first source
-    is used, and it must be at `location_code`, where the CTD depth comes from.
-    Windows are fetched oldest first and each is inserted before the next is
-    requested, so a long backfill that dies midway resumes from where it got
-    to. A failed request stops the run (raising FetchError) rather than
-    skipping ahead — rows past a gap would move MAX(time) beyond it and the gap
-    would never be re-fetched."""
+    measured depth, binned by bin_profile(). Sources may be at `location_code`
+    or on a child location (another instrument on the package); ONC's fixed
+    resample windows give every device on it the CTD's timestamps. Each
+    (location, device category) resumes from its own last stored timestamp,
+    so a newly added source backfills from the first deployment without
+    re-fetching the others. Windows are fetched oldest first and each is
+    inserted before the next is requested, so a long backfill that dies midway
+    resumes from where it got to. A failed request stops the run (raising
+    FetchError) rather than skipping ahead — rows past a gap would move
+    MAX(time) beyond it and the gap would never be re-fetched."""
     sensor_id = sensor["id"]
     variables = sensor["variables"]
 
-    code_to_canonical: dict[str, str] = {}
-    codes_by_category: dict[str, list[str]] = defaultdict(list)
-    for canonical, srcs in sources.items():
-        loc, cat, code = srcs[0]
-        if loc != location_code:
-            print(f"  '{canonical}': source {loc} isn't the profiler's location {location_code}, skipping")
-            continue
-        code_to_canonical[code] = canonical
-        codes_by_category[cat].append(code)
-    if not codes_by_category:
+    groups = profiler_groups(sources, location_code)
+    if not groups:
         print("  No canonical mappings, skipping.")
         return
 
-    last_times = [get_last_stored_time(ch_client, sensor_id, c) for c in code_to_canonical.values()]
-    valid_times = [t.astimezone(timezone.utc).replace(tzinfo=None) for t in last_times if t is not None]
-    date_from = floor_to_bin(min(valid_times) - timedelta(hours=OVERLAP_HOURS)) if valid_times else None
+    since: dict[tuple[str, str], datetime | None] = {}
+    for (loc, cat), by_code in groups.items():
+        lasts = [get_last_stored_time(ch_client, sensor_id, c, f"{loc}/{cat}")
+                 for cs in by_code.values() for c in cs]
+        since[(loc, cat)] = None if None in lasts else floor_to_bin(
+            min(lasts).astimezone(timezone.utc).replace(tzinfo=None) - timedelta(hours=OVERLAP_HOURS))
+    date_from = None if None in since.values() else min(since.values())
 
+    depth_group = (location_code, DEPTH_DEVICE_CATEGORY)
     try:
         deployments = get_deployments(location_code)
+        group_deployments = {g: deployments if g == depth_group else get_deployments(*g) for g in groups}
     except Exception as e:
         raise FetchError(f"deployments: {e}") from e
     windows = plan_windows(deployments, date_from, dt_to_naive_utc(date_to))
@@ -357,28 +388,29 @@ def store_profiler(ch_client, sensor: dict, location_code: str,
           f"{len(windows)} window(s) of ≤{PROFILER_CHUNK_DAYS} d")
 
     for start, stop in windows:
+        due = [g for g in groups
+               if (since[g] is None or since[g] < stop) and deployed_during(group_deployments[g], start, stop)]
+        if not due:
+            continue
         try:
-            # Depth first: every other device category is paired against it.
+            # Depth first: every other device is paired against it.
             ctd = fetch_profiler_window(location_code, DEPTH_DEVICE_CATEGORY,
-                                        [DEPTH_SENSOR_CODE, *codes_by_category.get(DEPTH_DEVICE_CATEGORY, [])],
+                                        [DEPTH_SENSOR_CODE, *(groups[depth_group] if depth_group in due else [])],
                                         start, stop)
-            fetched = [(DEPTH_DEVICE_CATEGORY, ctd)] + [
-                (cat, fetch_profiler_window(location_code, cat, codes, start, stop))
-                for cat, codes in codes_by_category.items() if cat != DEPTH_DEVICE_CATEGORY]
+            depth_at = dict(ctd.pop(DEPTH_SENSOR_CODE, []))
+            fetched = [(g, ctd if g == depth_group else fetch_profiler_window(*g, list(groups[g]), start, stop))
+                       for g in due]
         except Exception as e:
             raise FetchError(f"{start:%Y-%m-%d}–{stop:%Y-%m-%d}: {e}") from e
 
-        depth_at = dict(ctd.pop(DEPTH_SENSOR_CODE, []))
         rows = []
-        for cat, series in fetched:
+        for (loc, cat), series in fetched:
             for code, pts in series.items():
-                canonical = code_to_canonical.get(code)
-                if not canonical:
-                    continue
-                samples = [(t, depth_at[t], apply_conversion(v, canonical, variables))
-                           for t, v in pts if t in depth_at]
-                rows += [[sensor_id, t, d, canonical, v, f"{location_code}/{cat}"]
-                         for t, d, v in bin_profile(samples)]
+                for canonical in groups[(loc, cat)].get(code, []):
+                    samples = [(t, depth_at[t], apply_conversion(v, canonical, variables))
+                               for t, v in pts if t in depth_at]
+                    rows += [[sensor_id, t, d, canonical, v, f"{loc}/{cat}"]
+                             for t, d, v in bin_profile(samples)]
 
         for i in range(0, len(rows), BATCH_SIZE):
             ch_client.insert(
