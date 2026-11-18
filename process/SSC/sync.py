@@ -328,6 +328,10 @@ def sync_date(client, date_val: date, image_base_dir: str = IMAGE_BASE_DIR) -> b
     daily_native_path = _daily_native_path(date_val)
     try:
         hourly_rows = _export_native(client, date_val, native_path)
+        if not hourly_rows:
+            # Nothing ingested locally: syncing would "succeed" and delete the
+            # local images while the API machine gets no data.
+            raise RuntimeError(f'No local {date_val} rows in SalishSeaCast_hourly to sync — re-run ingest')
         _rsync_native_file(native_path)
         _rsync_images(date_val, image_base_dir)
         _notify_api(date_val, hourly_rows)

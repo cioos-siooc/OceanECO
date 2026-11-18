@@ -159,13 +159,19 @@ STATUS_FAILED_SYNC       = 'failed_sync'
 # Rows that exhaust this cap stay failed_* until a human intervenes.
 MAX_RETRY_ATTEMPTS = int(os.getenv('SSC_MAX_RETRY_ATTEMPTS', '3'))
 
+# A date at a sync stage has been ingested, so it is past every earlier stage
+# too (and its local hourly rows are kept until a sync succeeds).
+_SYNC_STATUSES = frozenset({
+    STATUS_PENDING_SYNC, STATUS_SYNCING, STATUS_SUCCESS_SYNC, STATUS_FAILED_SYNC,
+})
+
 # Statuses indicating a download variable has moved past its download stage.
 # Used as the compute gate: all download vars must be in this set.
 PAST_DOWNLOAD_STATUSES: frozenset[str] = frozenset({
     STATUS_SUCCESS_DOWNLOAD,
     STATUS_PENDING_IMAGE, STATUS_IMAGING, STATUS_SUCCESS_IMAGE, STATUS_FAILED_IMAGE,
     STATUS_PENDING_INGEST, STATUS_INGESTING, STATUS_SUCCESS_INGEST, STATUS_FAILED_INGEST,
-})
+}) | _SYNC_STATUSES
 
 # Statuses indicating a compute variable has moved past the compute stage.
 # Used to make `compute --date` a no-op once a date has already been computed.
@@ -173,14 +179,14 @@ PAST_COMPUTE_STATUSES: frozenset[str] = frozenset({
     STATUS_SUCCESS_COMPUTE,
     STATUS_PENDING_IMAGE, STATUS_IMAGING, STATUS_SUCCESS_IMAGE, STATUS_FAILED_IMAGE,
     STATUS_PENDING_INGEST, STATUS_INGESTING, STATUS_SUCCESS_INGEST, STATUS_FAILED_INGEST,
-})
+}) | _SYNC_STATUSES
 
 # Statuses indicating a variable has moved past the image stage.
 # Used to make `image --date` a no-op once a variable has already been imaged.
 PAST_IMAGE_STATUSES: frozenset[str] = frozenset({
     STATUS_SUCCESS_IMAGE,
     STATUS_PENDING_INGEST, STATUS_INGESTING, STATUS_SUCCESS_INGEST, STATUS_FAILED_INGEST,
-})
+}) | _SYNC_STATUSES
 
 # ClickHouse connection settings
 CH_HOST       = os.getenv('CH_HOST', 'localhost')
