@@ -133,7 +133,7 @@ services:
     image: clickhouse/clickhouse-server:26.5.1.882
     ports:
       - "8123:8123"
-      - "9000:9000"
+      - "9013:9000"
     volumes:
       - ${CH_DATA_DIR:-/home/cioos/clickhouse_data}:/var/lib/clickhouse
     environment:
