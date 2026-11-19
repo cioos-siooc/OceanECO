@@ -403,6 +403,11 @@ const viewMode = computed(() => mainStore.exploreView)
 // the same `selectedProfilerSensorId` the section fetch keys off, so the
 // toggle and the panel never disagree about whether it's available.
 const exploreSubViews = computed(() => {
+  // A glider's section is the only view about the glider; the others show the
+  // last map click or sensor, so they're hidden until the glider is cleared.
+  if (mainStore.selectedGliderId) {
+    return [{ value: 'glider', label: 'Glider', title: 'The selected glider deployment along its track' }]
+  }
   const hasProfiler = !!mainStore.selectedProfilerSensorId
   return [
     { value: 'series', label: 'Timeseries' },
@@ -411,7 +416,6 @@ const exploreSubViews = computed(() => {
       value: 'sensor-depth', label: 'Sensor depth', disabled: !hasProfiler,
       title: hasProfiler ? "The sensor's own depth section" : 'Select a profiling sensor first',
     },
-    ...(mainStore.selectedGliderId ? [{ value: 'glider', label: 'Glider', title: 'The selected glider deployment along its track' }] : []),
   ]
 })
 // Losing the profiler strands sensor-depth with nothing to draw.

@@ -86,6 +86,23 @@ export interface GliderClip {
     km: number
 }
 
+/** The sensor list's search + organization/variable filters, shared by the
+ *  store's filteredSensors (which the map's markers follow) and sensorInfo.vue's
+ *  "N stations match" hint for a query typed in the Gliders tab. */
+export function sensorMatches(
+    sensor: { name: string, organization?: string | null, variables?: Record<string, unknown> | null },
+    query: string, organizations: string[], variables: string[],
+): boolean {
+    const q = query.trim().toLowerCase();
+    if (q && !sensor.name.toLowerCase().includes(q) && !(sensor.organization ?? '').toLowerCase().includes(q)) return false;
+    if (organizations.length && !organizations.includes(sensor.organization ?? '')) return false;
+    if (variables.length) {
+        const sensorVars = Object.keys(sensor.variables ?? {});
+        if (!variables.some(v => sensorVars.includes(v))) return false;
+    }
+    return true;
+}
+
 export function formatDepthLabel(depth: number): string {
     return depth === -1 ? 'bottom' : depth.toFixed(1);
 }
@@ -357,7 +374,6 @@ export const useMainStore = defineStore('main', {
         },
 
         filteredSensors(state): Sensor[] {
-            const q = state.sensorSearchQuery.trim().toLowerCase();
             const period: ResolvedObsFilter = this.obsResolved;
             const t = (iso: string | null) => (iso ? Date.parse(iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`) : NaN);
             const inPeriod = (s: Sensor) => {
@@ -367,20 +383,8 @@ export const useMainStore = defineStore('main', {
                 if (period.to != null && !(t(s.first_data_at) < period.to)) return false;
                 return (s.members ?? [s]).some(m => state.sensorCoverage[m.id]?.some(ym => monthMatches(period, ym)));
             };
-            return state.sensors.filter((sensor) => {
-                if (!inPeriod(sensor)) return false;
-                if (q && !sensor.name.toLowerCase().includes(q) && !(sensor.organization ?? '').toLowerCase().includes(q)) {
-                    return false;
-                }
-                if (state.sensorOrganizationFilter.length && !state.sensorOrganizationFilter.includes(sensor.organization)) {
-                    return false;
-                }
-                if (state.sensorVariableFilter.length) {
-                    const sensorVars = Object.keys(sensor.variables ?? {});
-                    if (!state.sensorVariableFilter.some(v => sensorVars.includes(v))) return false;
-                }
-                return true;
-            });
+            return state.sensors.filter(s => inPeriod(s)
+                && sensorMatches(s, state.sensorSearchQuery, state.sensorOrganizationFilter, state.sensorVariableFilter));
         },
 
         /**
