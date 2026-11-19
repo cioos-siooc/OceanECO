@@ -35,7 +35,8 @@ from onc import ONC
 from ch_helpers import get_ch_client
 
 TOKEN = os.getenv("ONC_TOKEN", "7d291a6a-b57e-49cd-acb1-83f59010d32b")
-onc = ONC(TOKEN)
+# Profiler backfill windows (7 d at 10 s resample) take ONC ~2 min to compute; the default 60 s times out.
+onc = ONC(TOKEN, timeout=300)
 
 BATCH_SIZE = 10_000
 
