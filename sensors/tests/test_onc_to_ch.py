@@ -55,8 +55,8 @@ def test_plan_windows_skips_undeployed_gaps_and_ended_deployments():
 
 @pytest.mark.parametrize("date_from", [None, datetime(2024, 1, 1)])
 def test_plan_windows_starts_at_first_deployment_when_nothing_stored(date_from):
-    deps = [(datetime(2025, 6, 1), datetime(2025, 6, 3))]
-    assert plan_windows(deps, date_from, datetime(2026, 1, 1)) == [(datetime(2025, 6, 1), datetime(2025, 6, 3))]
+    deps = [(datetime(2025, 6, 1), datetime(2025, 6, 1, 12))]
+    assert plan_windows(deps, date_from, datetime(2026, 1, 1)) == [(datetime(2025, 6, 1), datetime(2025, 6, 1, 12))]
 
 
 def test_variable_sources_keeps_priority_order():

@@ -63,7 +63,7 @@ ONC_NOT_DEPLOYED = "API Error 127"
 PROFILER_RESAMPLE_SECONDS = 10    # ONC fixed windows: same timestamps across devices
 PROFILER_BIN_MINUTES = 60         # must divide an hour (floor_to_bin)
 PROFILER_BIN_METRES = 1.0
-PROFILER_CHUNK_DAYS = 7           # ~60k rows per sensor code per request
+PROFILER_CHUNK_DAYS = 1           # ~8.6k rows per sensor code per request; a 7-day YPVPP CTD window outran ONC's 300 s
 DEPTH_DEVICE_CATEGORY = "CTD"     # supplies the depth every variable is paired with
 DEPTH_SENSOR_CODE = "depth"
 
