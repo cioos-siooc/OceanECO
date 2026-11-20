@@ -5,6 +5,11 @@ detailed designs live in [notes/](notes/).
 
 ## Next (v1.1 candidates)
 
+### Admin dashboard
+An admin page for sensor freshness and controls (on map, auto-harvest, harvest now, add sensor), model run status
+and reprocessing, Prefect jobs, storage, app settings, an audit log and backups. It is read-only until unlocked.
+- Design and prototype: [notes/admin-dashboard/](notes/admin-dashboard/design.md).
+
 ### Polygon / region queries
 Draw an area (not just a Cross-Section line) and get area-averaged timeseries plus exposure stats,
 e.g. % of area with Ω aragonite < 1 or DO below hypoxic thresholds. Shellfish tenures, MPAs and

@@ -1,0 +1,698 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OceanECO Admin</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: OceanECO's "Instrument" theme (dark only, graphite + one ochre accent, 2px radius).
+   Left rail of sections; each section is summary first, then the working table. */
+:root {
+  color-scheme: dark;
+  --bg: #0d0f11; --bg-muted: #13161a; --bg-elev: #191d22; --bg-acc: #20252b;
+  --border: #262b31; --border-muted: #1e2227; --border-acc: #3a4048;
+  --dim: #5f6871; --muted: #7d868f; --toned: #a7afb7; --text: #d4d9de;
+  --accent: #e2a336; --accent-ink: #22160a; --accent-soft: #3a260c;
+  --sensor: #5fb3d6;
+  --ok: #7fbf8e; --lag: #d6c35e; --stale: #e0904f; --bad: #e07a7a; --none: #5f6871;
+  --font: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --r: 2px;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.app { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: 100%; }
+.rail { background: var(--bg-muted); border-right: 1px solid var(--border-muted); padding-block: 16px; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: 12px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; }
+.brand { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.brand b { font-weight: 600; letter-spacing: .01em; }
+.brand span { font: 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a { display: flex; justify-content: space-between; align-items: center; padding: 7px 8px; border-radius: var(--r); color: var(--toned); text-decoration: none; }
+.nav a:hover { background: var(--bg-elev); color: var(--text); }
+.nav a.on { background: var(--bg-elev); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.nav .count { font: 11px var(--mono); color: var(--muted); }
+.nav .count.alert { color: var(--bad); }
+.rail .foot { margin-top: auto; font-size: 12px; color: var(--muted); padding: 0 8px; display: flex; flex-direction: column; gap: 6px; }
+main { padding-block: 20px 96px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 20px; min-width: 0; max-width: 1280px; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 13px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: .07em; color: var(--toned); }
+.sub { color: var(--muted); font-size: 13px; max-width: 70ch; margin: 4px 0 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 11px var(--mono); padding: 2px 7px; border: 1px solid var(--border-acc); border-radius: var(--r); color: var(--toned); white-space: nowrap; }
+.chip.ex { border-style: dashed; color: var(--muted); }
+.panel { background: var(--bg-muted); border: 1px solid var(--border-muted); border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.grid { display: grid; gap: 12px; }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat { display: flex; flex-direction: column; gap: 4px; }
+.stat .k { font-size: 12px; color: var(--muted); }
+.stat .v { font: 500 26px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+.stat .n { font-size: 12px; color: var(--toned); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.s-live { background: var(--ok); } .s-lag { background: var(--lag); } .s-stale { background: var(--stale); } .s-silent { background: var(--bad); } .s-none { background: transparent; box-shadow: inset 0 0 0 1.5px var(--none); }
+.attn { display: flex; flex-direction: column; }
+.attn li { list-style: none; display: grid; grid-template-columns: 3px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border-muted); }
+.attn li:first-child { border-top: 0; }
+.attn .sev { align-self: stretch; border-radius: 1px; }
+.attn p { margin: 0; } .attn small { color: var(--muted); display: block; }
+ul { margin: 0; padding: 0; }
+.btn { border: 1px solid var(--border-acc); background: var(--bg-elev); padding: 5px 10px; border-radius: var(--r); cursor: pointer; white-space: nowrap; font-size: 13px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+.btn.danger { color: var(--bad); border-color: #5a2f2f; background: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--toned); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.bands { display: flex; height: 14px; border-radius: var(--r); overflow: hidden; gap: 2px; }
+.bands span { display: block; min-width: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--toned); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 5px 10px; cursor: pointer; color: var(--toned); display: inline-flex; gap: 6px; align-items: center; font-size: 13px; border-right: 1px solid var(--border); }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: var(--bg-acc); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.seg .c { font: 11px var(--mono); color: var(--muted); }
+input[type=search], input[type=text], input[type=date], select, textarea { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); padding: 5px 8px; min-width: 0; }
+input[type=search] { width: 220px; max-width: 100%; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--border-muted); border-radius: var(--r); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 8px 10px; background: var(--bg-muted); border-bottom: 1px solid var(--border); white-space: nowrap; position: sticky; top: 0; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--border-muted); vertical-align: middle; }
+tr.row { cursor: pointer; } tr.row:hover td { background: var(--bg-muted); }
+tr.sel td { background: var(--bg-elev); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.name { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted { color: var(--muted); }
+.vars { display: flex; gap: 3px; flex-wrap: wrap; }
+.v { font: 10px var(--mono); padding: 1px 4px; border-radius: var(--r); background: var(--bg-acc); color: var(--toned); }
+.status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.tog { position: relative; width: 30px; height: 16px; border-radius: 8px; background: var(--bg-acc); border: 1px solid var(--border-acc); cursor: pointer; flex: none; padding: 0; }
+.tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform .12s; }
+.tog[aria-checked=true] { background: var(--accent-soft); border-color: var(--accent); }
+.tog[aria-checked=true]::after { transform: translateX(14px); background: var(--accent); }
+.tog:disabled { opacity: .35; cursor: not-allowed; }
+.tog.changed { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--sensor); }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--bg-elev); border-left: 1px solid var(--border-acc); padding-block: max(16px, env(safe-area-inset-top, 0px)) 16px; padding-left: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px)); overflow-y: auto; display: flex; flex-direction: column; gap: 16px; z-index: 20; box-shadow: -12px 0 32px rgba(0,0,0,.35); }
+.drawer header { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.drawer h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.field input, .field select, .field textarea { color: var(--text); font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cov { display: flex; flex-direction: column; gap: 5px; }
+.cov div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12px; color: var(--toned); }
+.cov i { display: block; height: 8px; background: var(--bg); border-radius: 1px; position: relative; }
+.cov i b { position: absolute; top: 0; bottom: 0; background: var(--sensor); border-radius: 1px; }
+.mgrid { display: grid; gap: 2px; font-size: 11px; }
+.mgrid .lab { color: var(--toned); white-space: nowrap; padding-right: 8px; display: flex; align-items: center; }
+.mgrid .day { font: 10px var(--mono); color: var(--muted); text-align: center; }
+.cell { height: 22px; border-radius: 1px; border: 0; padding: 0; cursor: pointer; }
+.cell.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.st-sync { background: #3f6b4a; } .st-ingest { background: #5d8f68; } .st-image { background: #7fae7f; }
+.st-compute, .st-download { background: #4a5560; }
+.st-failed { background: var(--bad); } .st-pending { background: transparent; box-shadow: inset 0 0 0 1px var(--border-acc); }
+.st-na { background: var(--bg); }
+.bar { display: grid; grid-template-columns: 200px minmax(0, 1fr) 90px auto; gap: 10px; align-items: center; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--border-muted); }
+.bar:first-of-type { border-top: 0; }
+.bar i { display: block; height: 10px; background: var(--bg); border-radius: 1px; }
+.bar i b { display: block; height: 100%; background: var(--toned); border-radius: 1px; }
+.bar.left i b { background: var(--stale); }
+.pending { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; background: var(--bg-elev); border-top: 1px solid var(--sensor); padding-block: 10px max(10px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.pending ul { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.pending li { list-style: none; }
+.toast { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); top: max(16px, env(safe-area-inset-top, 0px)); background: var(--bg-acc); border: 1px solid var(--border-acc); padding: 8px 12px; border-radius: var(--r); z-index: 30; font-size: 13px; }
+.note { font-size: 12px; color: var(--muted); border-left: 2px solid var(--border-acc); padding-left: 10px; max-width: 75ch; }
+.list { display: flex; flex-direction: column; }
+.list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border-muted); }
+.list > div:first-child { border-top: 0; }
+.list p { margin: 0; } .list small { color: var(--muted); display: block; }
+.confirm { border: 1px solid #5a2f2f; background: #1c1214; padding: 12px; border-radius: var(--r); display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.lockbox { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--r); font-size: 12px; color: var(--toned); }
+.lockbox b { font-weight: 500; color: var(--text); }
+.lockbox.open { border-color: var(--accent); background: var(--accent-soft); }
+.lockbox .btn { align-self: flex-start; }
+body.locked .mut { opacity: .5; cursor: not-allowed; }
+body.locked .mut:hover { border-color: var(--border-acc); }
+.locknote { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--toned); background: var(--bg-muted); border: 1px solid var(--border-muted); border-radius: var(--r); padding: 8px 12px; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 40; padding: 16px; }
+.modal form { background: var(--bg-elev); border: 1px solid var(--border-acc); border-radius: var(--r); padding: 18px; width: min(360px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.modal h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.modal .err { color: var(--bad); font-size: 12px; }
+.modal form.wide { width: min(680px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+.modal section { display: flex; flex-direction: column; gap: 10px; }
+.modal table select { padding: 2px 4px; font-size: 12px; }
+.modal table input { width: 64px; padding: 2px 4px; font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); text-align: right; }
+.inline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--toned); }
+.ok-note { font-size: 12px; color: var(--ok); }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .nav { flex-direction: row; flex-wrap: wrap; } .nav .count { display: none; }
+  .rail .foot { display: none; }
+  .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g2 { grid-template-columns: minmax(0, 1fr); }
+  .bar { grid-template-columns: minmax(0, 1fr) 80px auto; } .bar i { grid-column: 1 / -1; grid-row: 2; }
+}
+@media (prefers-reduced-motion: reduce) { .tog::after { transition: none; } }
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b>OceanECO</b><span>Admin</span></div>
+    <div id="lockbox" class="lockbox"></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="foot">
+      <span style="display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--toned)">admin <button class="btn ghost" data-safe data-act="toast" data-msg="Would sign out">Sign out</button></span>
+      <span class="chip">dev snapshot · 12 Nov 2026 15:00 UTC</span>
+      <span>Sensor ages are measured from the last dev harvest.</span>
+      <span><span class="chip ex">example</span> marks illustrative rows.</span>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div id="drawer" class="drawer" hidden></div>
+<div id="pending" class="pending" hidden></div>
+<div id="adddlg" class="modal" hidden><form id="add-form" class="wide" autocomplete="off"></form></div>
+<div id="lockdlg" class="modal" hidden>
+  <form id="unlock-form" autocomplete="off">
+    <h3>Unlock editing</h3>
+    <p class="sub" style="margin:0">Enter the admin password again. Editing locks itself after 15 minutes without a change.</p>
+    <label class="field">Password<input type="password" id="unlock-pw" autocomplete="current-password"></label>
+    <span class="err" id="unlock-err" hidden>Enter the password to unlock.</span>
+    <div class="actions"><button class="btn primary" type="submit">Unlock</button><button class="btn ghost" type="button" data-act="unlock-cancel">Cancel</button></div>
+  </form>
+</div>
+
+<script>
+const REF = Date.UTC(2026, 10, 12, 15);
+// Active sensors from the dev ClickHouse: name, org, API, depth (m, -1 = profiler), first, last, variables
+const S = [
+["Profiling Instrument Package","ONC","ONC",-1,"2026-04-09","2026-11-12T15:00","ph,DO,T,S,chl"],
+["Burke-o-Lator, Bamfield Marine Sciences Centre (Provisional)","Hakai","ERDDAP",20,"2026-01-05","2026-11-12T14:30","ph,S,T"],
+["Folger Pinnacle","ONC","ONC",25,"2011-02-04","2026-11-12T14:30","S,DO,T,chl"],
+["China Creek Underwater Network","ONC","ONC",110.2,"2019-11-27","2026-11-12T13:30","S,DO,T,chl"],
+["Holyrood Bay Underwater Network","ONC","ONC",84.2,"2021-02-15","2026-11-12T13:30","ph,DO,T,S,chl"],
+["Cambridge Bay Underwater Network","ONC","ONC",8.5,"2014-09-28","2026-11-12T13:30","ph,DO,T,S,chl"],
+["Barkley Upper Slope","ONC","ONC",396.6,"2009-08-02","2026-11-12T13:30","S,DO,T,chl"],
+["Main Endeavour Field","ONC","ONC",2189.9,"2013-06-18","2026-11-12T13:30","T"],
+["Kitamaat Village Underwater Network","ONC","ONC",45.4,"2016-03-26","2026-11-12T13:30","S,DO,T,chl"],
+["Strait of Georgia VENUS Instrument Platform","ONC","ONC",298.9,"2008-09-25","2026-11-12T13:30","S,DO,T,chl"],
+["Bullseye","ONC","ONC",1256.8,"2011-07-12","2026-11-12T13:30","S,DO,T"],
+["ODP 1026","ONC","ONC",2657.6,"2009-09-03","2026-11-12T13:30","S,DO,T"],
+["ORCA1 - Twanoh: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2005-01-19","2026-11-12T13:00","S,DO,T,chl"],
+["Barkley Canyon Axis","ONC","ONC",983.7,"2013-09-11","2026-11-12T13:30","S,DO,T,chl"],
+["Barkley Canyon Mid-East","ONC","ONC",895,"2009-11-27","2026-11-12T13:30","S,DO,T,chl"],
+["Upper Slope South","ONC","ONC",394.2,"2010-05-27","2026-11-12T13:30","T"],
+["Kwakshua Channel (KC) Buoy CO2 (Provisional)","Hakai","ERDDAP",0.5,"2026-01-02","2026-11-12T12:30","S,T"],
+["NPBY2 - Carr Inlet: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2010-10-13","2026-11-12T07:00","S,DO,T,chl"],
+["ORCA2 - Hoodsport: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2005-10-20","2026-11-12T06:00","S,DO,T,chl"],
+["NPBY1 - Point Wells: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2010-04-12","2026-11-11T02:56","S,DO,T,chl"],
+["Strait of Georgia East VENUS Instrument Platform","ONC","ONC",167.1,"2008-03-01","2026-11-07T22:30","S,DO,T,chl"],
+["PISCES2 - PISCES-North: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2025-10-21","2026-10-31T23:00","S,DO,T,chl"],
+["PISCES2 - PISCES-North: Surface Station","University of Washington","ERDDAP",0,"2025-09-30","2026-09-25T20:30","S,T"],
+["BIOOS Wirewalker, Bute Inlet (Provisional)","Hakai","ERDDAP",-1,"2026-02-04","2026-09-23T13:59","DO,T"],
+["PISCES1 - PISCES-South: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2026-04-17","2026-08-25T11:00","S,DO,T,chl"],
+["PISCES1 - PISCES-South: Surface Station","University of Washington","ERDDAP",0,"2025-09-25","2026-08-08T17:30","S,T"],
+["Folger Deep","ONC","ONC",96.4,"2009-10-21","2026-07-18T09:30","S,T"],
+["ORCA3 - Hansville: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2005-11-18","2026-06-24T08:59","S,DO,T,chl"],
+["Burrard Inlet Underwater Network","ONC","ONC",28,"2019-03-29","2026-06-13T16:30","ph,DO,T,S,chl"],
+["Upper Slope Vertical Profiler","ONC","ONC",65.6,"2009-09-03","2026-05-21T03:30","ph,DO,T,S,chl"],
+["Campbell River Underwater Network","ONC","ONC",8.2,"2016-07-30","2026-01-15T06:30","S,DO,T,chl"],
+["40mbss","ONC","ONC",41.4,"2019-06-14","2025-12-20T01:30","S,ph,DO,T"],
+["Burke-o-Lator, Quadra Island Field Station (Research)","Hakai","ERDDAP",0,"2014-12-19","2025-12-18T20:30","Ωar,Ωca,ph,T,S"],
+["AS04 Mooring","ONC","ONC",113.2,"2013-02-07","2025-11-29T00:30","S,DO,T"],
+["BIOOS Buoy CO2, Bute Inlet (Research)","Hakai","ERDDAP",0.5,"2025-02-15","2025-11-21T17:30","pCO2,S,T"],
+["Saanich Inlet Sill","ONC","ONC",88,"2012-02-26","2025-10-30T23:30","S,DO,T"],
+["5mbss","ONC","ONC",4.9,"2019-06-14","2025-10-20T22:30","S,DO,T"],
+["20mbss","ONC","ONC",20.6,"2019-06-14","2025-10-20T22:30","S,DO,T"],
+["Hartley Bay Underwater Network","ONC","ONC",80.3,"2020-10-18","2025-09-21T11:30","S,DO,T,chl"],
+["ORCA4 - Dabob Bay: L3 Depth Gridded","University of Washington","ERDDAP",-1,"2010-06-07","2025-04-30T19:00","S,DO,T,chl"],
+["Yarrow Point","ONC","ONC",0.1,"2017-08-30","2023-05-29T11:30","S,DO,T,chl"],
+["St. John's Buoy","ONC","ONC",0,"2018-09-01","2023-03-14T00:30","T"],
+["JF2C Mooring","ONC","ONC",181.9,"2012-10-19","2022-10-20T23:30","S,DO,T"],
+["Wally Land","ONC","ONC",863,"2009-08-31","2022-05-26T21:30","S,T,chl"],
+["Port aux Basques Buoy","ONC","ONC",0,"2021-08-18","2022-04-25T00:30","T"],
+["Yarrow Point Profiler","ONC","ONC",-1,"2013-01-19","2022-02-05T05:00","S,T"],
+["Red Island Shoal Buoy","ONC","ONC",0,"2018-02-15","2022-01-11T22:30","T"],
+["Boundary Pass Mooring","ONC","ONC",222.7,"2012-10-15","2021-08-24T07:30","S,DO,T"],
+["Macaulay Outfall Mooring","ONC","ONC",55.6,"2013-02-07","2021-02-24T07:30","S,DO,T"],
+["Fraser River Delta Bottom Boundary Layer","ONC","ONC",145.1,"2014-03-09","2017-11-04T00:30","S,T"],
+["Barkley Canyon Mid-West","ONC","ONC",891.3,"2009-09-16","2015-01-13T05:30","T"],
+["Microsquid Digital Camera Frame","ONC","ONC",100.9,"2007-02-06","2014-03-06T01:30","S,T"],
+["Saanich Inlet VENUS Instrument Platform","ONC","ONC",95.5,null,null,""],
+].map(([name, org, api, depth, t0, t, vars], i) => {
+  const last = t ? Date.parse(t + 'Z') : null;
+  const h = last == null ? null : (REF - last) / 36e5;
+  const st = h == null ? 'none' : h < 24 ? 'live' : h < 168 ? 'lag' : h < 2160 ? 'stale' : 'silent';
+  return { id: i, name, org, api, depth, t0, t, last, h, st, vars: vars ? vars.split(',') : [], map: true, harvest: true };
+});
+const HIDDEN = [["DFO IOS", 581], ["DFO MEDS", 18]];
+const ST = { live: ['Live', 'under 24 h'], lag: ['Lagging', '1–7 days'], stale: ['Stale', '7–90 days'], silent: ['Silent', 'over 90 days'], none: ['No data', 'never reported'] };
+const STCLS = { live: 's-live', lag: 's-lag', stale: 's-stale', silent: 's-silent', none: 's-none' };
+const count = st => S.filter(s => s.st === st).length;
+
+const TABLES = [
+  ['Model', 'SalishSeaCast_daily', 415.68 * 1024, '15.6 B rows · 2007 → 15 Nov 2026'],
+  ['Model', 'SalishSeaCast_hourly', 27.45 * 1024, '4.76 B rows · 92-day window'],
+  ['Observations', 'sensor_timeseries', 447.31, '122 M rows'],
+  ['Observations', 'glider_profiles', 407.56, '141 M rows · v2 gliders'],
+  ['Observations', 'ship_cast_values', 395.21, '83.5 M rows · v2 casts'],
+  ['Leftover', 'LiveOcean_4h', 10.57 * 1024, 'LiveOcean was removed'],
+  ['Leftover', 'LiveOcean_daily', 5.33 * 1024, 'LiveOcean was removed'],
+  ['Leftover', 'grid_LO, LiveOcean_status, LiveOcean_days, staging', 2.67, 'LiveOcean was removed'],
+  ['Leftover', 'tt3, tt4', 0, 'empty Memory tables'],
+];
+const MVARS = ['temperature', 'salinity', 'total_alkalinity', 'dissolved_oxygen', 'dissolved_inorganic_carbon', 'ph_total', 'omega_arag', 'omega_cal'];
+const COMPUTED = new Set(['ph_total', 'omega_arag', 'omega_cal']);
+const DAYS = Array.from({ length: 28 }, (_, i) => new Date(Date.UTC(2026, 9, 22 + i)));
+function mstate(v, d) {
+  const day = d.getUTCDate(), mon = d.getUTCMonth();
+  if (mon === 9 || day <= 11) return { st: 'sync', label: 'success_sync', attempts: 1 };
+  if (day <= 14) return { st: 'ingest', label: 'success_ingest', attempts: 1 };
+  if (day === 15) return { st: 'image', label: 'success_image', attempts: 2 };
+  if (day === 16) return v === 'dissolved_inorganic_carbon' ? { st: 'failed', label: 'failed_download', attempts: 3, err: 'ERDDAP 502 Bad Gateway after 3 attempts' }
+    : COMPUTED.has(v) ? { st: 'failed', label: 'failed_compute', attempts: 1, err: 'missing input dissolved_inorganic_carbon for 2026-11-16' } : { st: 'image', label: 'success_image', attempts: 1 };
+  if (day === 17) return { st: 'pending', label: 'pending_download', attempts: 0 };
+  return { st: 'na', label: 'not published yet', attempts: 0 };
+}
+const JOBS = [
+  { name: 'OceanECO-sensors-ERDDAP', what: 'Hakai and UW sensors → sensor_timeseries', cron: '0 * * * *', every: 'hourly, on the hour', last: ['ok', 'Completed', '14:00, 3 m 12 s'], next: '16:00' },
+  { name: 'OceanECO-sensors-ONC', what: 'ONC sensors → sensor_timeseries', cron: '30 * * * *', every: 'hourly, at :30', last: ['ok', 'Completed', '14:30, 6 m 48 s'], next: '15:30' },
+  { name: 'oceaneco-ssc-pipeline', what: 'SalishSeaCast: download → compute → image → ingest → sync', cron: '0 */3 * * *', every: 'every 3 hours', last: ['bad', 'Failed', '12:00, 41 m · 4 days failed'], next: '15:00' },
+];
+let AUDIT = [
+  ['18 Nov 16:02', 'taimaz', 'Sensor', 'Hid 18 DFO MEDS sensors', 'on map: yes → no'],
+  ['14 Nov 09:40', 'taimaz', 'Model', 'Reran image step, 10–12 Nov, all variables', 'run 7f3c…'],
+  ['12 Nov 11:15', 'taimaz', 'Sensor', 'Renamed “BIOOS WW” to “BIOOS Wirewalker, Bute Inlet”', ''],
+  ['12 Nov 10:58', 'taimaz', 'App', 'Turned on “Ship casts” layer', 'off → on'],
+];
+const FLAGS = [
+  ['gliders', 'Gliders layer and tab', 'Glider tracks on the map and the Gliders tab in the sensor list.', true],
+  ['casts', 'Ship casts', 'IOS CTD and bottle casts as a map layer and list footer.', true],
+  ['area', 'Area tab', '4D observation box under a drawn circle.', true],
+  ['seafloor', 'ETOPO deep-water seafloor', 'Fill beyond the NRCan DEM with ETOPO 2022.', true],
+  ['maint', 'Maintenance notice', 'Shows the banner below and pauses CSV downloads.', false],
+];
+
+const LOCK_MS = 15 * 60e3;
+let unlockedUntil = 0;
+const unlocked = () => Date.now() < unlockedUntil;
+const SAFE = new Set(['close', 'restore-cancel', 'drop-cancel', 'discard', 'unlock', 'lock', 'unlock-cancel', 'add-cancel', 'add-type', 'add-lookup', 'add-back']);
+// Add-sensor dialog: pick a source, look it up (sensors/discover_erddap.py, discover_location.py), review, stage
+const APPVARS = ['temperature', 'salinity', 'dissolved_oxygen', 'ph_total', 'omega_arag', 'omega_cal', 'total_alkalinity', 'dissolved_inorganic_carbon', 'chlorophyll', 'nitrate', 'silicate', 'phosphate', 'co2_partial_pressure'];
+const LOOKUP = {
+  erddap: { title: 'Surface water properties, Example Buoy (Provisional)', org: 'Hakai', inst: 'Hakai Institute', pos: '49.300 N, 123.750 W', inDomain: true, depth: '1 m (constant depth column)', span: '2 Mar 2024 → 12 Nov 2026 · hourly',
+    vars: [['sea_water_temperature', 'degC', 'temperature', '°C', 1], ['sea_water_practical_salinity', '1', 'salinity', 'PSU', 1], ['dissolved_oxygen_concentration', 'mL L-1', 'dissolved_oxygen', 'µmol/kg', 44.66], ['ph_total_scale', '1', 'ph_total', '', 1], ['pco2_water', 'uatm', 'co2_partial_pressure', 'µatm', 1]],
+    unused: ['air_temperature', 'wind_speed', 'wind_direction', 'battery_voltage', 'qc_flag'] },
+  onc: { title: 'Example Underwater Network', org: 'ONC', inst: 'Ocean Networks Canada', pos: '49.040 N, 123.425 W', inDomain: true, depth: '172 m · 2 child locations', span: '14 Jun 2019 → 12 Nov 2026 · 1-minute, harvested as hourly means',
+    vars: [['CTD · temperature', 'C', 'temperature', '°C', 1], ['CTD · salinity', 'psu', 'salinity', 'PSU', 1], ['OXYSENSOR · oxygen_corrected', 'ml/l', 'dissolved_oxygen', 'µmol/kg', 44.66], ['PHSENSOR · ph_total', 'pH', 'ph_total', '', 1]],
+    unused: ['CTD · conductivity', 'CTD · pressure', 'FLNTU · turbidity'] },
+};
+let add = { type: 'erddap', src: '', filter: '', looked: false, map: true, harvest: true, from: 'all' };
+function renderAdd() {
+  const L = LOOKUP[add.type];
+  const srcPart = `<header style="display:flex;justify-content:space-between;gap:12px"><h3>Add sensor</h3><button class="btn ghost" type="button" data-act="add-cancel" aria-label="Close">✕</button></header>
+    <section><div class="seg" style="align-self:flex-start">${[['erddap', 'ERDDAP dataset'], ['onc', 'ONC location']].map(([id, l]) => `<button type="button" data-act="add-type" data-type="${id}" class="${add.type === id ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <label class="field">${add.type === 'erddap' ? 'tabledap URL' : 'Location code'}<input type="text" id="add-src" value="${esc(add.src)}" placeholder="${add.type === 'erddap' ? 'https://…/erddap/tabledap/DatasetID' : 'e.g. SCVIP'}" ${add.looked ? 'readonly' : ''}></label>
+    ${add.type === 'erddap' ? `<label class="field">Row filter (optional, for datasets holding several stations)<input type="text" id="add-filter" value="${esc(add.filter)}" placeholder='STN_ID="C46146"' ${add.looked ? 'readonly' : ''}></label>` : ''}
+    <span class="err" id="add-err" hidden>Enter a ${add.type === 'erddap' ? 'tabledap URL' : 'location code'} first.</span>
+    ${add.looked ? '' : `<div class="actions"><button class="btn primary" type="button" data-act="add-lookup">Look up</button><button class="btn ghost" type="button" data-act="add-cancel">Cancel</button></div>
+    <p class="note">The lookup reads the source's metadata only. It warns if this ${add.type === 'erddap' ? 'dataset and filter' : 'location'} is already a sensor.</p>`}</section>`;
+  if (!add.looked) return $('#add-form').innerHTML = srcPart;
+  $('#add-form').innerHTML = srcPart + `
+    <section><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><h2>Found</h2><span class="chip ex">example lookup</span></div>
+      <dl class="kv"><dt>Title</dt><dd>${L.title}</dd><dt>Institution</dt><dd>${L.inst}</dd><dt>Position</dt><dd>${L.pos} ${L.inDomain ? '<span class="ok-note">· inside the SalishSeaCast domain</span>' : ''}</dd><dt>Depth</dt><dd>${L.depth}</dd><dt>Record</dt><dd>${L.span}</dd></dl></section>
+    <section><h2>Variables</h2>
+      <div class="tablewrap"><table><thead><tr><th>Source</th><th>Unit</th><th>App variable</th><th class="num">× factor</th><th>→ unit</th></tr></thead><tbody>
+      ${L.vars.map(([src, u, app, to, f], i) => `<tr><td class="mono">${src}</td><td class="muted">${u}</td><td><select id="add-var-${i}" aria-label="App variable for ${src}"><option value="">not used</option>${APPVARS.map(v => `<option ${v === app ? 'selected' : ''}>${v}</option>`).join('')}</select></td><td class="num"><input type="text" id="add-f-${i}" value="${f}" aria-label="Conversion factor for ${src}"></td><td class="muted">${to}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="note">Matched by name and unit. ${L.unused.length} other columns aren't used: <span class="mono">${L.unused.join(', ')}</span>. A factor other than 1 converts to the app's unit at harvest time.</p></section>
+    <section><h2>Details</h2>
+      <label class="field">Display name<input type="text" id="add-name" value="${esc(L.title)}"></label>
+      <div class="grid g2"><label class="field">Organization<input type="text" id="add-org" value="${L.org}"></label><label class="field">First harvest<select id="add-from"><option ${add.from === 'all' ? 'selected' : ''} value="all">Whole record</option><option ${add.from === 'year' ? 'selected' : ''} value="year">Last 12 months</option><option ${add.from === 'none' ? 'selected' : ''} value="none">Nothing yet</option></select></label></div>
+      <label class="field">Note shown in the app (optional)<input type="text" id="add-note"></label>
+      <div class="toolbar"><span class="inline"><button type="button" class="tog" role="switch" aria-checked="${add.map}" data-act="add-map" aria-label="Show on map"></button>On map</span>
+      <span class="inline"><button type="button" class="tog" role="switch" aria-checked="${add.map && add.harvest}" data-act="add-harvest" aria-label="Auto-harvest" ${add.map ? '' : 'disabled title="Hidden sensors are not harvested"'}></button>Auto-harvest</span></div></section>
+    <div class="actions"><button class="btn primary" type="button" data-act="add-stage">Stage new sensor</button><button class="btn" type="button" data-act="add-back">Change source</button><button class="btn ghost" type="button" data-act="add-cancel">Cancel</button></div>`;
+}
+const isMut = el => el.dataset.tog != null || el.dataset.flag != null || (el.dataset.act != null && !SAFE.has(el.dataset.act) && el.dataset.safe == null);
+const VIEW_INPUTS = new Set(['q', 'org']);
+function renderLock() {
+  const on = unlocked(), box = $('#lockbox');
+  box.className = 'lockbox' + (on ? ' open' : '');
+  if (on) { const s = Math.ceil((unlockedUntil - Date.now()) / 1000); box.innerHTML = `<b>Editing unlocked</b><span>Locks in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}</span><button class="btn" data-act="lock">Lock now</button>`; }
+  else box.innerHTML = `<b>Read-only</b><span>Look around freely. Unlock to change anything.</span><button class="btn" data-act="unlock">Unlock…</button>`;
+}
+function applyLock() {
+  const on = unlocked();
+  document.body.classList.toggle('locked', !on);
+  document.querySelectorAll('[data-tog],[data-flag],[data-act]').forEach(el => el.classList.toggle('mut', isMut(el)));
+  document.querySelectorAll('main input, main select, main textarea, #drawer input, #drawer select, #drawer textarea').forEach(el => { if (!VIEW_INPUTS.has(el.id)) el.disabled = !on; });
+  renderLock();
+}
+function askUnlock() { $('#lockdlg').hidden = false; $('#unlock-err').hidden = true; const pw = $('#unlock-pw'); pw.value = ''; pw.focus(); }
+setInterval(() => {
+  if (unlockedUntil && !unlocked()) { unlockedUntil = 0; $('#adddlg').hidden = true; render(); toast('Editing locked again after 15 minutes without a change'); }
+  else if (unlocked()) renderLock();
+}, 1000);
+
+let view = 'overview', filter = 'all', org = 'all', q = '', selSensor = null, selCell = null, confirmDrop = false;
+const pending = new Map();
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const age = h => h == null ? '—' : h < 1 ? 'now' : h < 48 ? Math.round(h) + ' h' : h < 24 * 60 ? Math.round(h / 24) + ' d' : h < 24 * 730 ? Math.round(h / 24 / 30.4) + ' mo' : (h / 24 / 365).toFixed(1) + ' y';
+const fmtSize = mb => mb >= 1024 ? (mb / 1024).toFixed(1) + ' GiB' : mb >= 1 ? Math.round(mb) + ' MiB' : '0 B';
+const fmtDay = d => d.toLocaleDateString('en-CA', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2600); }
+
+const VIEWS = [
+  ['overview', 'Overview', () => ''],
+  ['sensors', 'Sensors', () => S.length],
+  ['model', 'Model runs', () => '<span class="count alert">2 failed</span>'],
+  ['jobs', 'Scheduled jobs', () => JOBS.length],
+  ['storage', 'Storage', () => '459 GiB'],
+  ['app-controls', 'App controls', () => ''],
+  ['audit', 'Audit log', () => ''],
+  ['backups', 'Backups', () => '6 h'],
+];
+const SNAPS = [
+  ['19 Nov 12:00', 'scheduled', 0, []],
+  ['19 Nov 06:00', 'scheduled', 0, []],
+  ['19 Nov 00:00', 'scheduled', 1, ['Hid 18 DFO MEDS sensors']],
+  ['18 Nov 18:00', 'scheduled', 0, []],
+  ['18 Nov 15:58', 'before restore', 0, []],
+  ['18 Nov 12:00', 'scheduled', 2, ['Reran image step, 10–12 Nov', 'Turned on “Ship casts” layer']],
+  ['18 Nov 06:00', 'scheduled', 0, []],
+];
+let restoreFrom = null;
+function renderNav() {
+  $('#nav').innerHTML = VIEWS.map(([id, label, c]) => {
+    const v = c(); return `<a href="#${id}" class="${view === id ? 'on' : ''}">${label}${String(v).startsWith('<') ? v : v !== '' ? `<span class="count">${v}</span>` : ''}</a>`;
+  }).join('');
+}
+
+function bands() {
+  const order = ['live', 'lag', 'stale', 'silent', 'none'];
+  return `<div class="bands">${order.map(st => `<span class="${STCLS[st]}" style="flex:${count(st)}" title="${ST[st][0]}: ${count(st)}"></span>`).join('')}</div>
+  <div class="legend">${order.map(st => `<span><i class="dot ${STCLS[st]}"></i>${ST[st][0]} ${count(st)} <span class="muted">${ST[st][1]}</span></span>`).join('')}</div>`;
+}
+
+function overview() {
+  const silent = count('silent') + count('none');
+  return `<div class="head"><div><h1>Overview</h1><p class="sub">What needs a decision today, then the state of each part of the app.</p></div></div>
+  <section class="panel"><h2>Needs attention</h2><ul class="attn">
+    <li><span class="sev" style="background:var(--bad)"></span><div><p>${silent} sensors haven't reported in over 90 days but are still polled every hour</p><small>They stay on the map either way. Turning off auto-harvest saves about ${silent * 24} source requests a day; “Harvest now” still works for each one. Includes Saanich Inlet VENUS, which has never returned data.</small></div><a class="btn" href="#sensors" data-filter="silent">Review</a></li>
+    <li><span class="sev" style="background:var(--bad)"></span><div><p>Model run failed for 16 Nov: dissolved inorganic carbon download, then pH and Ω compute <span class="chip ex">example</span></p><small>ERDDAP returned 502 three times. The app shows 15 Nov as the latest pH map.</small></div><a class="btn" href="#model">Open</a></li>
+    <li><span class="sev" style="background:var(--lag)"></span><div><p>Strait of Georgia East VENUS is 4.7 days behind; NPBY1 is 1.5 days behind</p><small>Both still harvest hourly. ONC sometimes delivers late, so this may clear on its own.</small></div><a class="btn" href="#sensors" data-filter="lag">Review</a></li>
+    <li><span class="sev" style="background:var(--stale)"></span><div><p>15.9 GiB of LiveOcean tables are still in ClickHouse</p><small>LiveOcean was removed from the app; nothing reads these tables.</small></div><a class="btn" href="#storage">Review</a></li>
+  </ul></section>
+  <div class="grid g4">
+    <div class="panel stat"><span class="k">Sensors on the map</span><span class="v">${S.length}</span><span class="n">of 652 · 599 hidden (DFO IOS, MEDS)</span></div>
+    <div class="panel stat"><span class="k">Reporting in the last 24 h</span><span class="v" style="color:var(--ok)">${count('live')}</span><span class="n">${Math.round(count('live') / S.length * 100)}% of the sensors on the map</span></div>
+    <div class="panel stat"><span class="k">Latest model day in the app</span><span class="v">15 Nov</span><span class="n">daily 2007 → 15 Nov · hourly last 92 days</span></div>
+    <div class="panel stat"><span class="k">ClickHouse on disk</span><span class="v">459 GiB</span><span class="n">16 GiB reclaimable</span></div>
+  </div>
+  <div class="grid g2">
+    <section class="panel"><h2>Sensor freshness</h2>${bands()}<p class="note">Age of each visible sensor's newest value. Thresholds are adjustable under App controls.</p></section>
+    <section class="panel"><h2>Recent admin actions</h2><div class="list">${AUDIT.slice(0, 4).map(a => `<div><p>${esc(a[3])}<small>${a[0]}</small></p><span class="chip">${a[2]}</span></div>`).join('')}</div></section>
+  </div>`;
+}
+
+function sensorsView() {
+  const orgs = [...new Set(S.map(s => s.org))];
+  const rows = S.filter(s => (filter === 'all' || s.st === filter) && (org === 'all' || s.org === org) && (!q || s.name.toLowerCase().includes(q.toLowerCase())));
+  const segs = [['all', 'All visible', S.length], ...['live', 'lag', 'stale', 'silent', 'none'].map(st => [st, ST[st][0], count(st)]), ['hidden', 'Hidden', 599]];
+  const body = filter === 'hidden'
+    ? HIDDEN.map(([o, n]) => `<tr><td colspan="10"><span class="status"><i class="dot s-none"></i>${o}</span> <span class="muted">· ${n} sensors, all hidden · data kept</span> <button class="btn ghost" data-safe data-act="toast" data-msg="Would open the ${o} group">Open group</button></td></tr>`).join('')
+    : rows.map(s => `<tr class="row ${selSensor === s.id ? 'sel' : ''}" data-sensor="${s.id}">
+      <td><span class="status"><i class="dot ${STCLS[s.st]}"></i>${ST[s.st][0]}</span></td>
+      <td class="name" title="${esc(s.name)}">${esc(s.name)}</td>
+      <td class="muted">${s.org === 'University of Washington' ? 'UW' : s.org}</td>
+      <td class="mono muted">${s.api}</td>
+      <td class="num">${s.depth < 0 ? 'profile' : s.depth + ' m'}</td>
+      <td><span class="vars">${s.vars.map(v => `<span class="v">${v}</span>`).join('')}</span></td>
+      <td class="num">${age(s.h)}</td>
+      <td>${tog(s, 'map')}</td><td>${tog(s, 'harvest')}</td>
+      <td><button class="btn ghost" data-act="harvest-one" data-id="${s.id}" ${s.map ? '' : 'disabled'} title="${s.map ? 'Harvest this sensor now' : 'Hidden sensors are not harvested'}" aria-label="Harvest now: ${esc(s.name)}">↻</button></td></tr>`).join('');
+  return `<div class="head"><div><h1>Sensors</h1><p class="sub">Every station the app knows about. “On map” is today's <span class="mono">active</span> flag. “Auto-harvest” decides whether a visible sensor is polled by the hourly job; ↻ harvests it once, by hand. Hiding a sensor also stops its harvest.</p></div>
+    <div class="actions"><button class="btn" data-act="add-open">Add sensor</button><button class="btn" data-act="toast" data-msg="Would run discovery for new ERDDAP datasets">Find new datasets</button></div></div>
+  <section class="panel">${bands()}</section>
+  <div class="toolbar">
+    <div class="seg" role="tablist">${segs.map(([id, l, c]) => `<button data-filter="${id}" class="${filter === id ? 'on' : ''}">${id !== 'all' && id !== 'hidden' ? `<i class="dot ${STCLS[id]}"></i>` : ''}${l} <span class="c">${c}</span></button>`).join('')}</div>
+    <select id="org" aria-label="Organization"><option value="all">All organizations</option>${orgs.map(o => `<option ${org === o ? 'selected' : ''}>${o}</option>`).join('')}</select>
+    <input type="search" id="q" placeholder="Search name" value="${esc(q)}" aria-label="Search sensors">
+    ${filter === 'silent' || filter === 'none' || filter === 'stale' ? `<button class="btn" data-act="bulk-harvest">Stop auto-harvest for these ${rows.length}</button>` : ''}
+  </div>
+  <div class="tablewrap"><table><thead><tr><th>Status</th><th>Name</th><th>Org</th><th>Source</th><th class="num">Depth</th><th>Variables</th><th class="num">Last value</th><th>On map</th><th>Auto-harvest</th><th></th></tr></thead><tbody>${body || '<tr><td colspan="10" class="muted">No sensors match.</td></tr>'}</tbody></table></div>`;
+}
+function tog(s, key) {
+  const k = s.id + ':' + key, changed = pending.has(k), locked = key === 'harvest' && !s.map;
+  return `<button class="tog ${changed ? 'changed' : ''}" role="switch" aria-checked="${s[key]}" ${locked ? 'disabled title="Hidden sensors are not harvested"' : ''} aria-label="${key === 'map' ? 'Show on map' : 'Auto-harvest'}: ${esc(s.name)}" data-tog="${s.id}" data-key="${key}"></button>`;
+}
+function sensorDrawer(s) {
+  const span = (a, b) => { const lo = Date.UTC(2005, 0, 1), w = REF - lo; return `left:${Math.max(0, (Date.parse(a) - lo) / w * 100)}%;right:${100 - (b - lo) / w * 100}%`; };
+  const full = { ph: 'pH (total)', DO: 'Dissolved oxygen', T: 'Temperature', S: 'Salinity', chl: 'Chlorophyll a', 'Ωar': 'Ω aragonite', 'Ωca': 'Ω calcite', pCO2: 'pCO₂' };
+  return `<header><div><h3>${esc(s.name)}</h3><p class="sub"><span class="status"><i class="dot ${STCLS[s.st]}"></i>${ST[s.st][0]}</span> · last value ${age(s.h)} ago</p></div><button class="btn ghost" data-act="close" aria-label="Close">✕</button></header>
+  <div class="actions"><button class="btn primary" data-act="toast" data-msg="Would start ${s.api === 'ONC' ? 'OceanECO-sensors-ONC' : 'OceanECO-sensors-ERDDAP'} for this sensor only">Harvest now</button><button class="btn" data-act="toast" data-msg="Would ask for a start date, then re-harvest from it">Backfill from…</button><button class="btn" data-safe data-act="toast" data-msg="Would open the app with this sensor selected">Open in app</button></div>
+  <section class="cov"><h2>Record, 2005 → today</h2>${s.t0 ? s.vars.map(v => `<div><span>${full[v] || v}</span><i><b style="${span(s.t0, s.last)}"></b></i></div>`).join('') : '<p class="muted">No values ingested yet.</p>'}</section>
+  <section style="display:flex;flex-direction:column;gap:10px"><h2>Details</h2>
+    <label class="field">Display name<input type="text" id="f-name" value="${esc(s.name)}"></label>
+    <div class="grid g2"><label class="field">Organization<input type="text" id="f-org" value="${esc(s.org)}"></label><label class="field">Nominal depth (m)<input type="text" id="f-depth" value="${s.depth < 0 ? '' : s.depth}" placeholder="profiler"></label></div>
+    <label class="field">Note shown in the app<textarea id="f-note" rows="2" placeholder="e.g. Instrument recovered for servicing until spring"></textarea></label>
+    <div class="actions"><button class="btn" data-act="save-meta" data-id="${s.id}">Stage changes</button></div>
+  </section>
+  <section style="display:flex;flex-direction:column;gap:8px"><h2>Variable mapping</h2>
+    <div class="tablewrap"><table><thead><tr><th>App variable</th><th>Source name</th><th>Unit</th><th class="num">× factor</th></tr></thead><tbody>
+    ${s.org === 'ONC' && s.vars.includes('DO') ? '<tr><td>dissolved_oxygen</td><td class="mono">oxygen_corrected</td><td>ml/L</td><td class="num">44.66</td></tr><tr><td>salinity</td><td class="mono">salinity</td><td>PSU</td><td class="num">1</td></tr><tr><td>temperature</td><td class="mono">temperature</td><td>°C</td><td class="num">1</td></tr>' : '<tr><td colspan="4" class="muted">Read from <span class="mono">sensors.variables</span>; editable here.</td></tr>'}
+    </tbody></table></div><p class="note">Unit fixes (like the 12 ERDDAP oxygen sensors stored unconverted) would be made here, with a re-harvest to apply them.</p>
+  </section>
+  <section class="kv"><dt>Source</dt><dd class="mono">${s.api}${s.org === 'ONC' ? ' · locationCode' : ' · tabledap'}</dd><dt>First value</dt><dd>${s.t0 || '—'}</dd><dt>Last value</dt><dd>${s.t ? s.t.replace('T', ' ') + ' UTC' : '—'}</dd></section>
+  <section class="confirm"><b>Delete this sensor's data</b><span class="muted">Removes its rows from sensor_timeseries. The sensor entry stays, hidden.</span><div class="actions"><button class="btn danger" data-act="toast" data-msg="Would ask you to type the sensor name first">Delete data…</button></div></section>`;
+}
+
+function modelView() {
+  const cols = `120px repeat(${DAYS.length}, minmax(14px, 1fr))`;
+  let g = `<div class="mgrid" style="grid-template-columns:${cols}"><span></span>${DAYS.map((d, i) => `<span class="day">${i % 7 === 0 || i === DAYS.length - 1 ? fmtDay(d) : ''}</span>`).join('')}`;
+  for (const v of MVARS) {
+    g += `<span class="lab">${v.replace(/_/g, ' ')}</span>` + DAYS.map((d, i) => { const m = mstate(v, d); const id = v + '|' + i; return `<button class="cell st-${m.st} ${selCell === id ? 'sel' : ''}" data-cell="${id}" aria-label="${v} ${fmtDay(d)}: ${m.label}" title="${v} · ${fmtDay(d)} · ${m.label}"></button>`; }).join('');
+  }
+  g += '</div>';
+  let side = '<p class="muted">Select a day to see its steps, attempts and errors.</p>';
+  if (selCell) {
+    const [v, i] = selCell.split('|'); const d = DAYS[+i]; const m = mstate(v, d);
+    const ymd = d.toISOString().slice(0, 10).replace(/-/g, '');
+    side = `<h2>${v.replace(/_/g, ' ')} · ${fmtDay(d)} 2026</h2><dl class="kv"><dt>Status</dt><dd class="mono">${m.label}</dd><dt>Attempts</dt><dd>${m.attempts}</dd><dt>File</dt><dd class="mono">/nc/${v}/${v}_${ymd}.nc</dd>${m.err ? `<dt>Error</dt><dd style="color:var(--bad)">${m.err}</dd>` : ''}</dl>
+    <div class="actions">${m.st === 'failed' ? `<button class="btn primary" data-act="stage" data-label="Retry ${v} ${fmtDay(d)} from ${m.label.replace('failed_', '')}">Retry from ${m.label.replace('failed_', '')}</button>` : ''}<button class="btn" data-act="stage" data-label="Rebuild map tiles: ${v} ${fmtDay(d)}">Rebuild map tiles</button><button class="btn" data-act="stage" data-label="Rerun all steps: ${v} ${fmtDay(d)}">Rerun all steps</button></div>`;
+  }
+  return `<div class="head"><div><h1>Model runs <span class="chip">SalishSeaCast</span></h1><p class="sub">One cell per variable per day, coloured by the furthest step it reached. Each step is a row in <span class="mono">SalishSeaCast_status</span>.</p></div><span class="chip ex">example states; dev only tracks temperature and oxygen</span></div>
+  <div class="grid g4">
+    <div class="panel stat"><span class="k">Daily table</span><span class="v">2007 → 15 Nov</span><span class="n">8 variables</span></div>
+    <div class="panel stat"><span class="k">Hourly window</span><span class="v">92 days</span><span class="n">older hours are dropped</span></div>
+    <div class="panel stat"><span class="k">Failed days</span><span class="v" style="color:var(--bad)">1</span><span class="n">16 Nov · 4 variables</span></div>
+    <div class="panel stat"><span class="k">Next scheduled run</span><span class="v">15:00</span><span class="n">every 3 hours</span></div>
+  </div>
+  <section class="panel"><div style="overflow-x:auto">${g}</div>
+    <div class="legend"><span><i class="dot st-sync"></i>Synced to prod</span><span><i class="dot st-ingest"></i>In ClickHouse</span><span><i class="dot st-image"></i>Map tiles made</span><span><i class="dot st-failed"></i>Failed</span><span><i class="dot st-pending"></i>Waiting</span><span><i class="dot st-na"></i>Not on ERDDAP yet</span></div></section>
+  <div class="grid g2">
+    <section class="panel">${side}</section>
+    <section class="panel"><h2>Reprocess a range</h2>
+      <div class="grid g2"><label class="field">From<input type="date" id="r-from" value="2026-11-10"></label><label class="field">To<input type="date" id="r-to" value="2026-11-16"></label></div>
+      <label class="field">Starting step<select id="r-step"><option>download</option><option>compute</option><option selected>image</option><option>ingest</option><option>sync</option></select></label>
+      <label class="field">Variables<select id="r-vars"><option>All 8</option><option>Carbonate only (pH, Ω)</option><option>One variable…</option></select></label>
+      <p class="note">Waits for a running scheduled run to finish; never runs alongside one.</p>
+      <div class="actions"><button class="btn" data-act="stage-range">Stage reprocess</button></div></section>
+  </div>`;
+}
+
+function jobsView() {
+  return `<div class="head"><div><h1>Scheduled jobs</h1><p class="sub">Our three Prefect deployments on pipelines.cioospacific.ca. Run history and logs stay in Prefect; this page starts, pauses and summarizes.</p></div><span class="chip ex">run results are examples</span></div>
+  <section class="panel"><div class="list">${JOBS.map(j => `<div><p><b>${j.name}</b><small>${j.what}</small><small class="mono">${j.cron} · ${j.every} · next ${j.next}</small></p>
+    <div class="actions" style="align-items:center"><span class="status"><i class="dot ${j.last[0] === 'ok' ? 's-live' : 's-silent'}"></i>${j.last[1]} <span class="muted">${j.last[2]}</span></span>
+    <button class="btn" data-act="toast" data-msg="Would start a run of ${j.name} now">Run now</button><button class="btn" data-act="stage" data-label="Pause schedule: ${j.name}">Pause</button><button class="btn ghost" data-safe data-act="toast" data-msg="Would open this deployment in Prefect">Prefect ↗</button></div></div>`).join('')}</div></section>
+  <section class="panel"><h2>Harvest one sensor</h2><div class="toolbar"><select id="one-sensor" aria-label="Sensor">${S.slice(0, 20).map(s => `<option>${esc(s.name)}</option>`).join('')}</select><button class="btn" data-act="toast" data-msg="Would run the matching flow with sensor_id set">Run</button></div><p class="note">Both sensor flows already accept a <span class="mono">sensor_id</span> parameter, so this needs no pipeline change.</p></section>`;
+}
+
+function storageView() {
+  const max = Math.max(...TABLES.map(t => t[2]));
+  const group = g => TABLES.filter(t => t[0] === g).map(t => `<div class="bar ${g === 'Leftover' ? 'left' : ''}"><span class="mono">${t[1]}</span><i><b style="width:${Math.max(.4, Math.sqrt(t[2] / max) * 100)}%"></b></i><span class="num">${fmtSize(t[2])}</span><span class="muted" style="font-size:12px">${t[3]}</span></div>`).join('');
+  return `<div class="head"><div><h1>Storage</h1><p class="sub">ClickHouse tables by size (bar length is square-root scaled so small tables stay visible), plus the caches the app keeps.</p></div></div>
+  <section class="panel"><h2>Model</h2>${group('Model')}</section>
+  <section class="panel"><h2>Observations</h2>${group('Observations')}</section>
+  <section class="panel"><div class="head"><h2>Not used by the app</h2><button class="btn danger" data-act="drop">Drop these tables…</button></div>${group('Leftover')}
+    ${confirmDrop ? `<div class="confirm"><b>Drop 7 tables, 15.9 GiB</b><span>This can't be undone. Type <span class="mono">drop liveocean</span> to confirm.</span><div class="toolbar"><input type="text" id="drop-confirm" aria-label="Type drop liveocean"><button class="btn danger" data-act="drop-go">Drop</button><button class="btn ghost" data-act="drop-cancel">Cancel</button></div></div>` : ''}</section>
+  <section class="panel"><h2>Caches and files</h2><div class="list">
+    <div><p>API response cache<small>Cached JSON for timeseries, profiles and snapshots.</small></p><button class="btn" data-act="toast" data-msg="Would clear the API response cache">Clear</button></div>
+    <div><p>Map tiles on disk <span class="chip ex">needs an endpoint</span><small>SalishSeaCast/images and seafloor tiles; sizes read by the API.</small></p><button class="btn" disabled>Clear</button></div>
+    <div><p>Grid cache<small>cache/oa_grid_cache.npz, rebuilt from grid_SSC on first use.</small></p><button class="btn" data-act="toast" data-msg="Would delete the grid cache file">Rebuild</button></div>
+  </div></section>`;
+}
+
+function appView() {
+  return `<div class="head"><div><h1>App controls</h1><p class="sub">Settings the public app reads at load time, so a change needs no deploy.</p></div></div>
+  <section class="panel"><h2>Notice banner</h2>
+    <label class="field">Message<input type="text" id="b-msg" value="Model maps for 16 Nov are delayed while SalishSeaCast's server recovers."></label>
+    <div class="toolbar"><select id="b-level" aria-label="Banner level"><option>Info</option><option selected>Warning</option></select><select id="b-until" aria-label="Show until"><option>Until I turn it off</option><option selected>For 24 hours</option></select><button class="btn" data-act="stage" data-label="Publish notice banner">Stage</button></div></section>
+  <section class="panel"><h2>Features</h2><div class="list">${FLAGS.map(([id, l, d, on]) => `<div><p>${l}<small>${d}</small></p><button class="tog" role="switch" aria-checked="${on}" aria-label="${l}" data-flag="${id}"></button></div>`).join('')}</div></section>
+  <section class="panel"><h2>Sensor freshness thresholds</h2><div class="grid g4">
+    <label class="field">Live, under<input type="text" id="th-live" value="24 h"></label><label class="field">Lagging, under<input type="text" id="th-lag" value="7 days"></label><label class="field">Stale, under<input type="text" id="th-stale" value="90 days"></label><label class="field">Email me when a sensor turns<select id="th-mail"><option>Stale</option><option selected>Silent</option><option>Never</option></select></label></div></section>
+  `;
+}
+
+function backupsView() {
+  const restore = restoreFrom == null ? '' : (() => {
+    const later = SNAPS.slice(0, restoreFrom).flatMap(s => s[3]);
+    return `<div class="confirm" style="border-color:var(--border-acc);background:var(--bg-elev)"><b>Restore the ${SNAPS[restoreFrom][0]} snapshot</b>
+      <span>${later.length ? `Reverts ${later.length} change${later.length > 1 ? 's' : ''} made since then:` : 'Nothing has changed since then.'}</span>
+      ${later.length ? `<ul style="padding-left:18px">${later.map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
+      <span class="muted">A snapshot of the current state is taken first, so the restore itself can be undone.</span>
+      <div class="actions">${later.length ? `<button class="btn primary" data-act="stage" data-label="Restore snapshot ${SNAPS[restoreFrom][0]}">Stage restore</button>` : ''}<button class="btn ghost" data-act="restore-cancel">Cancel</button></div></div>`;
+  })();
+  return `<div class="head"><div><h1>Backups</h1><p class="sub">Snapshots of everything this dashboard controls, so any earlier state can be compared and restored.</p></div><span class="chip ex">snapshots are examples</span></div>
+  <div class="grid g2">
+    <section class="panel"><h2>What a snapshot holds</h2><div class="list">
+      <div><p>Sensors<small>On map, auto-harvest, names, organizations, depths, notes, variable mappings: all 652 entries.</small></p><span class="chip">~140 KB</span></div>
+      <div><p>App controls<small>Notice banner, features, freshness thresholds, email alerts.</small></p><span class="chip">&lt; 1 KB</span></div>
+      <div><p>Job schedules<small>Paused or running, for each of the three Prefect deployments.</small></p><span class="chip">&lt; 1 KB</span></div>
+    </div><p class="note">Measurements and model output are left out: sensors can be re-harvested and model days reprocessed. The audit log is kept in full rather than snapshotted.</p></section>
+    <section class="panel"><h2>Schedule</h2>
+      <label class="field">Take a snapshot<select id="bk-every"><option selected>Every 6 hours</option><option>Daily, at 00:00 UTC</option></select></label>
+      <label class="field">Keep<select id="bk-keep"><option selected>6-hourly for 7 days, then daily for 90 days</option><option>Daily for 30 days</option></select></label>
+      <label class="field">Also copy to<select id="bk-copy"><option selected>S3 bucket (survives losing the database)</option><option>Nowhere else</option></select></label>
+      <p class="note">A snapshot is also taken before every restore and before any bulk change of more than 10 sensors.</p>
+      <div class="actions"><button class="btn" data-act="toast" data-msg="Would take a snapshot now">Snapshot now</button></div></section>
+  </div>
+  <section class="panel"><h2>Snapshots</h2>${restore}
+    <div class="tablewrap"><table><thead><tr><th>Taken (UTC)</th><th>Trigger</th><th class="num">Changes since previous</th><th></th></tr></thead><tbody>${SNAPS.map((s, i) => `<tr><td class="mono">${s[0]}</td><td>${s[1]}</td><td class="num">${s[2] || '—'}</td><td style="text-align:right"><button class="btn" data-safe data-act="toast" data-msg="Would download this snapshot as JSON">Download</button> <button class="btn" data-act="restore" data-i="${i}" ${i === 0 ? 'disabled title="This is the current state"' : ''}>Restore…</button></td></tr>`).join('')}</tbody></table></div></section>`;
+}
+
+function auditView() {
+  return `<div class="head"><div><h1>Audit log</h1><p class="sub">Every change made from this dashboard, with the value before and after. Applied changes from this prototype appear here too.</p></div><span class="chip ex">first 4 rows are examples</span></div>
+  <p class="note">Undo reverts that one change; to go back further, restore a snapshot under Backups.</p>
+  <div class="tablewrap"><table><thead><tr><th>When (UTC)</th><th>Area</th><th>Change</th><th>Detail</th><th></th></tr></thead><tbody>${AUDIT.map(a => `<tr><td class="mono">${a[0]}</td><td><span class="chip">${a[2]}</span></td><td>${esc(a[3])}</td><td class="muted mono">${esc(a[4])}</td><td><button class="btn ghost" data-act="stage" data-label="Undo: ${esc(a[3])}">Undo</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderPending() {
+  const el = $('#pending');
+  el.hidden = pending.size === 0;
+  if (!pending.size) return;
+  el.innerHTML = `<b>${pending.size} staged change${pending.size > 1 ? 's' : ''}</b><ul>${[...pending.values()].slice(0, 4).map(p => `<li class="chip">${esc(p)}</li>`).join('')}${pending.size > 4 ? `<li class="chip">+${pending.size - 4} more</li>` : ''}</ul><button class="btn ghost" data-act="discard">Discard</button><button class="btn primary" data-act="apply">Apply ${pending.size}</button>`;
+  applyLock();
+}
+
+function render() {
+  renderNav();
+  $('#main').innerHTML = (unlocked() ? '' : `<div class="locknote"><span>Read-only. Nothing on this page can be changed until you unlock editing.</span><button class="btn" data-act="unlock">Unlock…</button></div>`)
+    + { overview, sensors: sensorsView, model: modelView, jobs: jobsView, storage: storageView, 'app-controls': appView, audit: auditView, backups: backupsView }[view]();
+  const d = $('#drawer');
+  d.hidden = !(view === 'sensors' && selSensor != null);
+  if (!d.hidden) d.innerHTML = sensorDrawer(S[selSensor]);
+  renderPending();
+}
+
+function route() {
+  const h = location.hash.slice(1);
+  view = VIEWS.some(v => v[0] === h) ? h : 'overview';
+  if (view !== 'sensors') selSensor = null;
+  render(); window.scrollTo(0, 0);
+}
+addEventListener('hashchange', route);
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-tog],[data-filter],[data-sensor],[data-cell],[data-act],[data-flag]');
+  if (!t) return;
+  if (isMut(t)) {
+    if (!unlocked()) { e.stopPropagation(); return askUnlock(); }
+    unlockedUntil = Date.now() + LOCK_MS;
+  }
+  const act = t.dataset.act;
+  if (act === 'add-open') { add = { type: 'erddap', src: '', filter: '', looked: false, map: true, harvest: true, from: 'all' }; renderAdd(); $('#adddlg').hidden = false; return $('#add-src').focus(); }
+  if (act === 'add-cancel') { $('#adddlg').hidden = true; return; }
+  if (act === 'add-type') { add.type = t.dataset.type; add.src = ''; add.filter = ''; return renderAdd(); }
+  if (act === 'add-lookup') {
+    add.src = $('#add-src').value.trim(); add.filter = $('#add-filter')?.value.trim() || '';
+    if (!add.src) { $('#add-err').hidden = false; return; }
+    add.looked = true; return renderAdd();
+  }
+  if (act === 'add-back') { add.looked = false; return renderAdd(); }
+  if (act === 'add-map' || act === 'add-harvest') {
+    // update in place so typed details and variable choices survive
+    if (act === 'add-map') { add.map = !add.map; if (!add.map) add.harvest = false; } else add.harvest = !add.harvest;
+    const h = $('[data-act="add-harvest"]');
+    $('[data-act="add-map"]').setAttribute('aria-checked', add.map);
+    h.setAttribute('aria-checked', add.map && add.harvest); h.disabled = !add.map;
+    return;
+  }
+  if (act === 'add-stage') {
+    const name = $('#add-name').value.trim() || LOOKUP[add.type].title;
+    pending.set('new:' + name, `Add sensor: ${name}${add.map ? '' : ' (hidden)'}${add.map && add.harvest ? '' : ', no auto-harvest'}`);
+    $('#adddlg').hidden = true; renderPending(); return toast('Staged new sensor');
+  }
+  if (t.dataset.act === 'unlock') return askUnlock();
+  if (t.dataset.act === 'unlock-cancel') { $('#lockdlg').hidden = true; return; }
+  if (t.dataset.act === 'lock') { unlockedUntil = 0; restoreFrom = null; confirmDrop = false; render(); return toast(pending.size ? 'Locked. Staged changes are kept; unlock to apply them.' : 'Locked'); }
+  if (t.dataset.tog != null) {
+    e.stopPropagation();
+    const s = S[+t.dataset.tog], key = t.dataset.key, k = s.id + ':' + key;
+    s[key] = !s[key];
+    if (pending.has(k)) pending.delete(k); else pending.set(k, `${key === 'map' ? (s.map ? 'Show' : 'Hide') : (s.harvest ? 'Start auto-harvest' : 'Stop auto-harvest')}: ${s.name}`);
+    // hidden ⇒ not harvested; showing again leaves auto-harvest off until turned on
+    if (key === 'map' && !s.map && s.harvest) { s.harvest = false; const hk = s.id + ':harvest'; if (pending.has(hk)) pending.delete(hk); else pending.set(hk, 'Stop auto-harvest: ' + s.name); }
+    return render();
+  }
+  if (t.dataset.flag) { const on = t.getAttribute('aria-checked') !== 'true'; t.setAttribute('aria-checked', on); FLAGS.find(x => x[0] === t.dataset.flag)[3] = on; const k = 'flag:' + t.dataset.flag; if (pending.has(k)) pending.delete(k); else pending.set(k, `${on ? 'Turn on' : 'Turn off'}: ${t.getAttribute('aria-label')}`); return renderPending(); }
+  if (t.dataset.filter) { filter = t.dataset.filter; selSensor = null; if (t.tagName === 'A') return; return render(); }
+  if (t.dataset.sensor) { selSensor = +t.dataset.sensor; return render(); }
+  if (t.dataset.cell) { selCell = t.dataset.cell; return render(); }
+  const a = t.dataset.act;
+  if (a === 'toast') toast(t.dataset.msg + ' (prototype)');
+  if (a === 'close') { selSensor = null; render(); }
+  if (a === 'stage') { pending.set('x:' + t.dataset.label, t.dataset.label); renderPending(); toast('Staged'); }
+  if (a === 'stage-range') { const l = `Reprocess ${$('#r-from').value} → ${$('#r-to').value} from ${$('#r-step').value}, ${$('#r-vars').value}`; pending.set('x:' + l, l); renderPending(); toast('Staged'); }
+  if (a === 'save-meta') { const s = S[+t.dataset.id]; pending.set('meta:' + s.id, 'Edit details: ' + $('#f-name').value); renderPending(); toast('Staged'); }
+  if (a === 'bulk-harvest') {
+    S.filter(s => s.st === filter && s.harvest).forEach(s => { s.harvest = false; pending.set(s.id + ':harvest', 'Stop auto-harvest: ' + s.name); });
+    render();
+  }
+  if (a === 'harvest-one') { const s = S[+t.dataset.id]; toast(`Would run ${s.api === 'ONC' ? 'OceanECO-sensors-ONC' : 'OceanECO-sensors-ERDDAP'} for “${s.name}” only (prototype)`); }
+  if (a === 'restore') { restoreFrom = +t.dataset.i; render(); }
+  if (a === 'restore-cancel') { restoreFrom = null; render(); }
+  if (a === 'discard') {
+    for (const k of pending.keys()) {
+      const m = k.match(/^(\d+):(map|harvest)$/); if (m) S[+m[1]][m[2]] = !S[+m[1]][m[2]];
+      const f = k.startsWith('flag:') && FLAGS.find(x => x[0] === k.slice(5)); if (f) f[3] = !f[3];
+    }
+    pending.clear(); restoreFrom = null; render(); toast('Discarded staged changes');
+  }
+  if (a === 'apply') {
+    const now = '19 Nov ' + new Date().toISOString().slice(11, 16);
+    [...pending.values()].reverse().forEach(p => AUDIT.unshift([now, 'you', p.split(':')[0].includes('arvest') || p.startsWith('Add sensor') || p.startsWith('Show') || p.startsWith('Hide') || p.startsWith('Edit') ? 'Sensor' : p.startsWith('Turn') || p.startsWith('Publish') ? 'App' : p.startsWith('Restore') ? 'Backup' : p.startsWith('Undo') ? 'Undo' : 'Model', p, 'prototype: nothing was changed']));
+    pending.clear(); toast('Applied and logged (prototype: nothing was changed)'); render();
+  }
+  if (a === 'drop') { confirmDrop = true; render(); }
+  if (a === 'drop-cancel') { confirmDrop = false; render(); }
+  if (a === 'drop-go') { if ($('#drop-confirm').value.trim() === 'drop liveocean') { confirmDrop = false; toast('Would drop 7 tables (prototype)'); render(); } else toast('Type “drop liveocean” exactly'); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'q') { q = e.target.value; const pos = e.target.selectionStart; render(); const el = $('#q'); el.focus(); el.setSelectionRange(pos, pos); }
+});
+document.addEventListener('change', e => { if (e.target.id === 'org') { org = e.target.value; render(); } });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('#lockdlg').hidden) { $('#lockdlg').hidden = true; return; }
+  if (!$('#adddlg').hidden) { $('#adddlg').hidden = true; return; }
+  if (selSensor != null) { selSensor = null; render(); }
+});
+$('#add-form').addEventListener('submit', e => { e.preventDefault(); if (!add.looked) $('[data-act="add-lookup"]').click(); });
+$('#unlock-form').addEventListener('submit', e => {
+  e.preventDefault();
+  // prototype: any non-empty password unlocks; the real check happens on the server
+  if (!$('#unlock-pw').value) { $('#unlock-err').hidden = false; return; }
+  $('#unlock-pw').value = ''; $('#lockdlg').hidden = true;
+  unlockedUntil = Date.now() + LOCK_MS; render(); toast('Editing unlocked for 15 minutes');
+});
+route();
+</script>
