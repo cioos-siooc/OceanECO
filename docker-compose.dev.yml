@@ -28,6 +28,7 @@ services:
     volumes:
       - ./api:/app
       - ./shared:/app/shared
+      - ./sensors:/app/sensors
       - ./data:/opt/data
     ports:
       - "${API_PORT:-4000}:4000"
@@ -45,6 +46,9 @@ services:
       - CH_REMOTE_URL=${CH_REMOTE_URL:-}
       - CH_REMOTE_USER=${CH_REMOTE_USER:-}
       - CH_REMOTE_PASSWORD=${CH_REMOTE_PASSWORD:-}
+      # Admin dashboard: no Cloudflare Access in dev, so this email signs every /manage request.
+      - ADMIN_DEV_EMAIL=${ADMIN_DEV_EMAIL:-dev@localhost}
+      - ADMIN_ORIGINS=${ADMIN_ORIGINS:-http://localhost:${FRONT_PORT:-9010}}
     depends_on:
       - db-ch
     command: uvicorn SERVER:app --reload --host 0.0.0.0 --port 4000

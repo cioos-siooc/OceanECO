@@ -10,6 +10,8 @@ COPY api/requirements.txt ./
 RUN uv pip install --system -r requirements.txt
 COPY api . 
 COPY shared ./shared
+# Add sensor (admin dashboard) uses the harvester's discovery helpers
+COPY sensors/*.py ./sensors/
 
 # Allow any user (e.g. host UID passed via docker-compose user:) to write to /app
 RUN chmod -R a+rwX /app

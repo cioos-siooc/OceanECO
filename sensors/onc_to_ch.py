@@ -74,9 +74,12 @@ def get_active_onc_sensors(ch_client, sensor_id_filter: str | None) -> list[dict
     where = "JSONExtractString(source, 'api') = 'ONC'"
     if sensor_id_filter is not None:
         where += f" AND id = '{sensor_id_filter}'"
+    else:
+        # auto_harvest (admin dashboard): off = skipped by scheduled runs; "Harvest now" names the id.
+        where += " AND auto_harvest"
     rows = ch_client.query(
         f"SELECT id, name, depth, variables, device_config FROM sensors FINAL "
-        f"WHERE active = 1 AND {where}"
+        f"WHERE active AND {where}"
     ).result_rows
     sensors = []
     for row in rows:

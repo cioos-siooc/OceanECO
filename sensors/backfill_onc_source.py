@@ -48,7 +48,7 @@ def get_onc_sensors(ch_client) -> list[dict]:
             "variables": json.loads(r[5]) if r[5] else {},
             "device_config": json.loads(r[6]) if r[6] else {},
             "source": json.loads(r[7]) if r[7] else {},
-            "active": int(r[8]),
+            "active": bool(r[8]),
             "organization": r[9] or "",
         })
     return sensors

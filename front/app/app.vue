@@ -18,6 +18,7 @@
         <img src="/cioos_pacific.png" alt="OA Logo" class="logo-icon" />
       </a>
 
+      <template v-if="route.path !== '/admin'">
       <!-- Optional: Add menu items here -->
       <!-- FEEDBACK FORM -->
       <UButton variant="ghost" href="https://docs.google.com/forms/d/e/1FAIpQLSdGiIclM5wvIbPReZydsXKiRBXbZsQVEdoQPlA0EruKIoNJkg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">
@@ -34,6 +35,7 @@
       <NuxtLink to="/about" target="_blank">
         <UButton variant="ghost">About</UButton>
       </NuxtLink>
+      </template>
 
     </header>
 
@@ -60,6 +62,7 @@ import ApiStatusIndicator from './components/status/ApiStatusIndicator.vue'
 import ApiStatusBanner from './components/status/ApiStatusBanner.vue'
 import { useApiStatus } from '~~/composables/useApiStatus'
 const mainStore = useMainStore();
+const route = useRoute();
 const config = useRuntimeConfig();
 // NUXT_PUBLIC_* env values are JSON-parsed at runtime, so "1.0" arrives as the number 1.
 const versionLabel = computed(() => {

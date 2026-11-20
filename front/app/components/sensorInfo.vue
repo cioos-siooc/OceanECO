@@ -92,6 +92,7 @@
                     <div class="ml-4 text-[11px] leading-4 font-medium text-muted">
                         <div>{{ depth2txt(sensor) }} · {{ coordTxt(sensor.latitude, sensor.longitude) }}</div>
                         <div>{{ formatDataRange(sensor) }}</div>
+                        <div v-if="sensor.note" class="mt-1 text-toned">{{ sensor.note }}</div>
 
                         <div class="mt-1.5 flex flex-wrap gap-1">
                             <UBadge size="xs" color="neutral" variant="subtle" class="rounded-full" v-for="varKey in modelVariablesOf(sensor.variables)" :key="varKey"

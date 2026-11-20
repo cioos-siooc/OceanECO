@@ -15,9 +15,11 @@ CREATE TABLE IF NOT EXISTS default.sensors
     variables     String,       -- JSON: {canonical: {name, unit, conversion_factor}}
     device_config String,       -- JSON: ONC {locationCode, sources: {canonical: [{locationCode, deviceCategoryCode, sensorCategoryCode}]}}
     source        String,       -- JSON: {type: "ERDDAP"|"ONC", link: "..."}
-    active        UInt8,
+    active        Bool,
     updated_at    DateTime DEFAULT now(),
-    organization  String DEFAULT ''
+    organization  String DEFAULT '',
+    auto_harvest  Bool DEFAULT true, -- admin dashboard: false = scheduled harvests skip it
+    note          String DEFAULT ''  -- admin dashboard: shown in the app
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;

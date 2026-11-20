@@ -227,20 +227,22 @@ def _upsert(ch_client, row: dict):
             json.dumps(row["variables"]),
             json.dumps(row.get("device_config", {})),
             json.dumps(row["source"]),
-            int(row["active"]),
+            bool(row["active"]),
             datetime.now(tz=timezone.utc).replace(tzinfo=None),
             row.get("organization", ""),
+            bool(row.get("auto_harvest", True)),
+            row.get("note", ""),
         ]],
         column_names=["id", "name", "latitude", "longitude", "depth",
                       "variables", "device_config", "source", "active", "updated_at",
-                      "organization"],
+                      "organization", "auto_harvest", "note"],
     )
 
 
 def _get_sensor(ch_client, sensor_id: str) -> dict | None:
     rows = ch_client.query(
         f"SELECT id, name, latitude, longitude, depth, variables, "
-        f"device_config, source, active, organization "
+        f"device_config, source, active, organization, auto_harvest, note "
         f"FROM sensors FINAL WHERE id = '{sensor_id}'"
     ).result_rows
     if not rows:
@@ -255,8 +257,10 @@ def _get_sensor(ch_client, sensor_id: str) -> dict | None:
         "variables": json.loads(r[5]) if r[5] else {},
         "device_config": json.loads(r[6]) if r[6] else {},
         "source": json.loads(r[7]) if r[7] else {},
-        "active": int(r[8]),
+        "active": bool(r[8]),
         "organization": r[9] or "",
+        "auto_harvest": bool(r[10]),
+        "note": r[11] or "",
     }
 
 
@@ -295,9 +299,11 @@ CREATE TABLE IF NOT EXISTS default.sensors
     variables     String,
     device_config String,
     source        String,
-    active        UInt8,
+    active        Bool,
     updated_at    DateTime DEFAULT now(),
-    organization  String DEFAULT ''
+    organization  String DEFAULT '',
+    auto_harvest  Bool DEFAULT true, -- admin dashboard: false = scheduled harvests skip it
+    note          String DEFAULT ''  -- admin dashboard: shown in the app
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;
@@ -489,7 +495,7 @@ def cmd_update(ch_client, args):
     print(f"Updated sensor {args.id} ({sensor['name']}).")
 
 
-def cmd_set_active(ch_client, args, active: int):
+def cmd_set_active(ch_client, args, active: bool):
     sensor = _get_sensor(ch_client, args.id)
     if not sensor:
         print(f"ERROR: sensor {args.id} not found.", file=sys.stderr)
@@ -528,6 +534,11 @@ def cmd_import(ch_client, args):
             "SELECT id, name FROM sensors FINAL"
         ).result_rows
     }
+    # Dashboard-only fields survive --overwrite; the catalog doesn't carry them.
+    dashboard_fields = {
+        row[0]: {"auto_harvest": row[1], "note": row[2]}
+        for row in ch_client.query("SELECT name, auto_harvest, note FROM sensors FINAL").result_rows
+    }
 
     added = skipped = failed = 0
     for entry in entries:
@@ -563,7 +574,8 @@ def cmd_import(ch_client, args):
             "device_config": device_config,
             "source": source,
             "organization": entry.get("organization", ""),
-            "active": 0 if entry.get("inactive") else 1,
+            "active": not entry.get("inactive"),
+            **dashboard_fields.get(name, {}),
         }
         _upsert(ch_client, row)
         verb = "UPDATE" if (name in existing and args.overwrite) else "  ADD "
@@ -638,7 +650,7 @@ def main():
     upd_p.add_argument("--organization")
     _add_variable_args(upd_p)
 
-    for cmd, help_str in [("deactivate", "Set active=0."), ("activate", "Set active=1.")]:
+    for cmd, help_str in [("deactivate", "Set active to false."), ("activate", "Set active to true.")]:
         p = sub.add_parser(cmd, help=help_str)
         p.add_argument("--id", required=True, metavar="UUID")
 
@@ -658,9 +670,9 @@ def main():
     elif args.command == "update":
         cmd_update(ch_client, args)
     elif args.command == "deactivate":
-        cmd_set_active(ch_client, args, active=0)
+        cmd_set_active(ch_client, args, active=False)
     elif args.command == "activate":
-        cmd_set_active(ch_client, args, active=1)
+        cmd_set_active(ch_client, args, active=True)
 
 
 if __name__ == "__main__":

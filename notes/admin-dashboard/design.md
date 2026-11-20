@@ -11,13 +11,14 @@ dev ClickHouse on 12 Nov 2026. Rows marked *example* are illustrative.
 
 | Topic | Decision |
 |---|---|
-| Users | One account, `admin`, with a password. No roles. The audit log doesn't record a user. |
-| Read-only by default | After login everything is read-only. **Unlock** asks for the password again. Editing relocks after 15 minutes without a change, or with **Lock now**. The server must refuse writes from a locked session; greying out buttons is not enough. |
+| Users | A fixed list of admin emails, all with full access, kept in the Cloudflare Access policy (not editable in the dashboard). Login is Cloudflare Access's one-time PIN sent to the email. The audit log records the email. |
+| Read-only by default | After login everything is read-only. **Unlock** is a deliberate confirm (no second code). Editing relocks after 15 minutes without a change, or with **Lock now**. The server refuses writes from a locked session. |
 | Staged changes | Changes collect in a bottom bar and take effect only on **Apply**, which writes them to the audit log. **Discard** reverts them. Staged changes survive a relock, but Apply needs another unlock. |
 | Sensor visibility and harvest | **On map** is today's `sensors.active`. **Auto-harvest** is a new per-sensor flag: whether the hourly job polls it. Silent sensors stay on the map. A hidden sensor is never harvested. A visible one can have auto-harvest on or off. **Harvest now** (↻) runs one sensor by hand. |
 | Variables | Not editable here. Names, units and visibility stay in `shared/variable_config.yml`. |
 | Backups | A snapshot of everything the dashboard controls every 6 hours (or daily). Keep 6-hourly for 7 days, then daily for 90 days, with an optional copy to S3. A snapshot is also taken before every restore and before any bulk change over 10 sensors. Measurements and model output are not included, since they can be re-harvested or reprocessed. The audit log is kept in full. |
-| Access | Cloudflare Access and the login are decided later. |
+| Model runs | Status only (latest day, table bounds, sync history). No retry, rerun or reprocess from here. |
+| Deferred | App controls (banner, feature switches, maintenance mode, thresholds), backups, email alerts and more: see ROADMAP.md. |
 
 ## Sections
 
@@ -55,11 +56,7 @@ dev ClickHouse on 12 Nov 2026. Rows marked *example* are illustrative.
   `{pending,success,failed}_{download,compute,image,ingest,sync}`.
 - Admin auth precedent: `/admin/syncDaily` and `/admin/syncHourly` in `api/SERVER.py`.
 
-## New pieces needed
+## Built
 
-- A `sensors` column for auto-harvest. The harvest flows must skip sensors with it off. Hiding a sensor turns it off.
-- `/admin/*` API endpoints: sensor freshness, sensor writes, model status grid, reprocess, job controls (Prefect
-  API), table sizes, cache clears, app settings, audit log, snapshots and restore.
-- Storage for app settings, the audit log and snapshots (ClickHouse tables; snapshots optionally copied to S3).
-- The public app reading app settings (banner, feature switches) at load time.
-- The admin login with the read-only/unlock session and its server-side write check.
+The first version is at `/admin` on the `/manage/*` API; CLAUDE.md describes both under "Admin dashboard". The
+prototype still shows the deferred sections (App controls, Backups) for reference.

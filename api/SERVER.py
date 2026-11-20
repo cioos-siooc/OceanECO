@@ -26,6 +26,7 @@ from modules.extract_image import generate_image
 from modules.ocean_analysis import lookup_grid_cells_for_polygon, lookup_nearest_grid_cell, query_region_timeseries
 from modules.sync_hourly import import_native_file, import_daily_native_file, SyncConflict, SyncError, SYNC_API_TOKEN
 from modules import response_cache
+from modules import admin as admin_module
 
 async def run_in_process(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
@@ -106,6 +107,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(admin_module.router, prefix="/manage")
+
+
+@app.on_event("startup")
+def _admin_schema():
+    # /sensors reads the admin columns (note), so they must exist before the first visitor.
+    try:
+        admin_module._client().close()
+    except Exception:
+        logger.exception("Admin schema setup failed; retried on the first /manage call")
 
 
 # Explicit PNG route that sets cache-control for compatibility with Mapbox and browsers
@@ -199,7 +211,7 @@ async def get_sensors():
                 s.id, s.name, s.latitude, s.longitude, s.depth,
                 s.device_config, s.variables, s.active,
                 ts.first_data_at, ts.latest_data_at, ts.depth_min, ts.depth_max,
-                s.source, s.organization
+                s.source, s.organization, s.note
             FROM sensors AS s FINAL
             LEFT JOIN (
                 SELECT sensor_id,
@@ -210,7 +222,7 @@ async def get_sensors():
                 FROM sensor_timeseries
                 GROUP BY sensor_id
             ) ts ON ts.sensor_id = s.id
-            WHERE s.active = 1
+            WHERE s.active
             SETTINGS join_use_nulls = 1
         """)
         sensors = []
@@ -230,6 +242,7 @@ async def get_sensors():
                 "depth_max": float(row[11]) if row[11] is not None else None,
                 "source": json.loads(row[12]) if row[12] else {},
                 "organization": row[13] if row[13] else "",
+                "note": row[14] or "",
             })
         return sensors
 
