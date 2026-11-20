@@ -81,6 +81,11 @@ def get_last_stored_time(ch_client, sensor_id: str, canonical: str) -> datetime 
     return None
 
 
+def no_matching_results(resp) -> bool:
+    """ERDDAP answers an empty result (e.g. start time past the dataset's end) with a 404 too."""
+    return resp.status_code == 404 and "no matching results" in resp.text
+
+
 def insert_rows(ch_client, rows: list):
     for start in range(0, len(rows), BATCH_SIZE):
         ch_client.insert(
@@ -158,6 +163,9 @@ def fetch_tabledap_csv(
     print(f"  GET {url}")
 
     resp = requests.get(url, timeout=120)
+    if no_matching_results(resp):
+        print("  No records after the requested start time.")
+        return []
     if resp.status_code == 404:
         raise RuntimeError(f"Dataset not found (404): {base_url}")
     if resp.status_code != 200:
@@ -241,6 +249,9 @@ def fetch_griddap_nc(
     print(f"  GET {url}")
 
     resp = requests.get(url, timeout=300, verify=False)
+    if no_matching_results(resp):
+        print("  No time steps after the requested start time.")
+        return np.array([]), np.array([], dtype=np.float32), {}
     if resp.status_code == 404:
         raise RuntimeError(f"Dataset not found (404): {base_url}")
     if resp.status_code != 200:
