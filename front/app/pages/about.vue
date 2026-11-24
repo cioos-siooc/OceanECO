@@ -181,6 +181,9 @@
                                 <UButton variant="solid" size="lg" color="secondary" href="mailto:taimazb@oceannetworks.ca" class="font-bold rounded-lg mx-2 my-2 sm:my-0" leading-icon="i-mdi-email">
                                     Taimaz Bahadory
                                 </UButton>
+                                <UButton variant="outline" size="lg" color="info" href="https://docs.google.com/forms/d/e/1FAIpQLSdGiIclM5wvIbPReZydsXKiRBXbZsQVEdoQPlA0EruKIoNJkg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer" class="font-bold rounded-lg mx-2 my-2 sm:my-0" leading-icon="i-mdi-message-text-outline">
+                                    Feedback Survey
+                                </UButton>
                             </div>
                         </div>
                     </div>
