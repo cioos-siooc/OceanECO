@@ -1,7 +1,8 @@
-import type moment from 'moment';
+import moment from 'moment';
 import { defineStore } from 'pinia'
 import colors from '@/config/palette';
 import { trackEvent } from '~~/composables/useAnalytics';
+import { utc2pst } from '~~/composables/useUTC2PST';
 
 // Depths are plain numbers (the WebP filename stem too, e.g. 18.0 -> "18.0.webp")
 // — -1 is the synthetic bottom-layer sentinel ("bottom.webp").
@@ -424,6 +425,16 @@ export const useMainStore = defineStore('main', {
         // exclusions for high-frequency, non-navigational state changes).
         setExploreBinMode(mode: 'hourly' | 'daily' | 'monthly') {
             this.exploreBinMode = mode;
+            // Hourly data only covers the retention window (`dts`); an instant picked
+            // in daily/monthly history would leave the map tile and profile empty.
+            const dt = this.selected_variable.dt;
+            const dts = this.variables.find(v => v.source === this.selected_variable.source && v.var === this.selected_variable.var)?.dts;
+            if (mode !== 'hourly' || !dt || !dts?.length) return;
+            const ms = dt.valueOf();
+            if (ms >= dts[0]! && ms <= dts[dts.length - 1]!) return;
+            const nearest = dts.reduce((a, b) => Math.abs(b - ms) < Math.abs(a - ms) ? b : a);
+            this.updateSelectedVariable({ dt: moment.utc(nearest) });
+            this.pushSnack({ color: 'info', text: `Hourly data covers only recent months — moved to ${utc2pst(moment.utc(nearest))}.` });
         },
 
         setExploreWindowEnd(ms: number | null) {

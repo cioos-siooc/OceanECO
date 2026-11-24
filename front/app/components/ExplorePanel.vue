@@ -235,7 +235,16 @@ const {
 // wrapped page()/confirmDatePick() below, and re-set if paging happens to
 // land back on the live edge.
 const pinnedToLatest = ref(true)
-watch([binMode, point, source, varId], () => { pinnedToLatest.value = true })
+watch([point, source, varId], () => { pinnedToLatest.value = true })
+// A mode switch keeps the selected instant in view instead of jumping to latest.
+// Registered after useTimeDepthWindow's own binMode reset, so this one wins.
+watch(binMode, (mode: BinMode) => {
+  const dt = mainStore.selected_variable.dt
+  if (!dt) { pinnedToLatest.value = true; return }
+  const centred = addBins(floorToBin(moment.utc(dt).toDate(), mode), Math.ceil(binCount.value / 2), mode)
+  windowEnd.value = clampWindowEnd(centred)
+  pinnedToLatest.value = !canPageForward.value
+})
 
 // The section's own highlighted cell — replaces the old horizontal depth
 // line now that there's no companion line chart below the section for a
