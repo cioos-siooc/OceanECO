@@ -264,7 +264,8 @@ export function theilSenSlope(pts: { x: number; y: number }[]): { slope: number;
 
 // --- CLIMATOLOGY BASELINE (shared by Extreme Events + Climatology Anomaly) ---
 
-export type ClimDay = { doy: number; mean: number; std: number; p10: number; p90: number; n: number };
+/** `pLo`/`pHi` are the `tailPct` and `100 - tailPct` percentiles (p10/p90 by default). */
+export type ClimDay = { doy: number; mean: number; std: number; pLo: number; pHi: number; n: number };
 
 // Cumulative days before each month, non-leap calendar (Jan=index 0).
 const CUM_DAYS_NONLEAP = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
@@ -280,13 +281,13 @@ export function dayOfYear365(month: number, day: number): number {
 /**
  * Day-of-year climatology: for each of the 365 calendar-day buckets, pools all values
  * within +/- windowDays (wrapped across the Dec31->Jan1 boundary) across every year present
- * in `series`, then computes mean/std/p10/p90. Feb 29 is dropped from the pooling entirely
+ * in `series`, then computes mean/std and the tailPct / (100 - tailPct) percentiles. Feb 29 is dropped from the pooling entirely
  * (not given its own bucket) so every year contributes the same 365 samples and Feb 29
  * doesn't end up an under-sampled outlier bucket. This is a different concern from the
  * "OVERLAY_REF_YEAR" trick used for the basic chart's display axis — that solves where a
  * date is *drawn*, this solves which statistical bucket a date *belongs to*.
  */
-export function computeClimatologyBaseline(series: SeriesPoint[], windowDays = 5): ClimDay[] {
+export function computeClimatologyBaseline(series: SeriesPoint[], windowDays = 5, tailPct = 10): ClimDay[] {
     const dailyValues: { doy: number; value: number }[] = [];
     for (const d of series) {
         if (d.value == null) continue;
@@ -314,13 +315,13 @@ export function computeClimatologyBaseline(series: SeriesPoint[], windowDays = 5
             if (vals) pooled.push(...vals);
         }
         if (pooled.length < 5) {
-            climatology.push({ doy, mean: NaN, std: NaN, p10: NaN, p90: NaN, n: pooled.length });
+            climatology.push({ doy, mean: NaN, std: NaN, pLo: NaN, pHi: NaN, n: pooled.length });
             continue;
         }
         pooled.sort((a, b) => a - b);
         const mean = pooled.reduce((s, v) => s + v, 0) / pooled.length;
         const std = Math.sqrt(pooled.reduce((s, v) => s + (v - mean) ** 2, 0) / pooled.length);
-        climatology.push({ doy, mean, std, p10: percentileOf(pooled, 10), p90: percentileOf(pooled, 90), n: pooled.length });
+        climatology.push({ doy, mean, std, pLo: percentileOf(pooled, tailPct), pHi: percentileOf(pooled, 100 - tailPct), n: pooled.length });
     }
     return climatology;
 }
@@ -362,13 +363,13 @@ export type ExtremeEvent = {
 /** Resolves the threshold (and, for anomaly math, the baseline it's measured against) for a given ISO date. */
 export type ThresholdLookup = (iso: string) => { threshold: number; baseline: number } | undefined;
 
-/** Threshold lookup backed by a day-of-year climatology — `direction: 'above'` uses p90, `'below'` uses p10. */
+/** Threshold lookup backed by a day-of-year climatology — `direction: 'above'` uses pHi, `'below'` uses pLo. */
 export function climatologyThresholdLookup(climatology: ClimDay[], direction: 'above' | 'below'): ThresholdLookup {
     const climByDoy = new Map(climatology.map(c => [c.doy, c]));
     return (iso: string) => {
         const clim = climatologyForDate(climByDoy, iso);
-        if (!clim || Number.isNaN(clim.p90)) return undefined;
-        return { threshold: direction === 'above' ? clim.p90 : clim.p10, baseline: clim.mean };
+        if (!clim || Number.isNaN(clim.pHi)) return undefined;
+        return { threshold: direction === 'above' ? clim.pHi : clim.pLo, baseline: clim.mean };
     };
 }
 

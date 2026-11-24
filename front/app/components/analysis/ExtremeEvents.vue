@@ -10,6 +10,10 @@
         class="mb-3" aria-label="Event direction" />
 
       <template v-if="thresholdMode === 'percentile'">
+        <div class="ctrl-label">Percentile</div>
+        <UInput v-model.number="percentile" type="number" class="mb-3"
+          :min="direction === 'above' ? 50 : 1" :max="direction === 'above' ? 99 : 50" />
+
         <div class="ctrl-label">Baseline window (± days)</div>
         <UInput v-model.number="windowDays" type="number" class="mb-3" min="1" max="30" />
       </template>
@@ -26,7 +30,7 @@
 
       <div class="text-gray-500 mt-2">
         <template v-if="thresholdMode === 'percentile'">
-          Flags days crossing the {{ direction === 'above' ? '90th' : '10th' }} percentile of a day-of-year
+          Flags days crossing the {{ ordinal(percentile) }} percentile of a day-of-year
           climatological baseline (marine-heatwave-style methodology), merges nearby runs, and keeps events
           lasting at least the minimum duration.
         </template>
@@ -106,6 +110,21 @@ const direction = field<'above' | 'below'>('direction', LOW_EXTREME_VARS.has(pro
 const thresholdMode = field<'percentile' | 'fixed'>('thresholdMode', 'percentile')
 const fixedThreshold = field('fixedThreshold', 0)
 const windowDays = field('windowDays', 5)
+// Stored as the tail size (10 = p90 above / p10 below) so flipping direction mirrors the
+// percentile instead of e.g. keeping 90 and flagging nearly every day as "below".
+const tailPct = field('tailPct', 10)
+const percentile = computed({
+  get: () => direction.value === 'above' ? 100 - tailPct.value : tailPct.value,
+  set: (v: number) => {
+    if (!Number.isFinite(v)) return
+    const t = direction.value === 'above' ? 100 - v : v
+    tailPct.value = Math.min(50, Math.max(0.1, t))
+  },
+})
+const ordinal = (n: number) => {
+  const r = n % 100, s = (r >= 11 && r <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
+  return `${n}${s}`
+}
 const minDurationDays = field('minDurationDays', 5)
 const maxGapDays = field('maxGapDays', 2)
 
@@ -113,7 +132,7 @@ const valueLabel = computed(() => variableLabel(props.variable) || 'Value')
 // Shared by the markArea fill and the 'Events' legend swatch so they can't drift apart.
 const eventColor = computed(() => direction.value === 'above' ? 'rgba(255,110,118,0.18)' : 'rgba(73,146,255,0.18)')
 
-const climatology = computed(() => computeClimatologyBaseline(props.series, windowDays.value))
+const climatology = computed(() => computeClimatologyBaseline(props.series, windowDays.value, tailPct.value))
 const thresholdLookup = computed<ThresholdLookup>(() => thresholdMode.value === 'percentile'
   ? climatologyThresholdLookup(climatology.value, direction.value)
   : fixedThresholdLookup(fixedThreshold.value))
@@ -157,7 +176,7 @@ const csv = useCsvExport()
 
 const csvParams = computed(() => thresholdMode.value === 'percentile'
   ? [
-      ['threshold', `${direction.value === 'above' ? '90th' : '10th'} percentile of a day-of-year climatology`] as [string, unknown],
+      ['threshold', `${ordinal(percentile.value)} percentile of a day-of-year climatology`] as [string, unknown],
       ['baseline_half_window_days', windowDays.value] as [string, unknown],
     ]
   : [['threshold', `fixed ${direction.value === 'above' ? '>' : '<'} ${fixedThreshold.value}${unitSuffix.value}`] as [string, unknown]])
