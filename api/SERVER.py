@@ -2,6 +2,7 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Literal, Optional, Tuple
 from functools import partial
@@ -106,6 +107,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# User-guide clips (front/app/pages/guide), kept off the frontend's git/Vercel deploy. Range requests work, so seeking does.
+app.mount("/videos", StaticFiles(directory=os.environ.get("GUIDE_VIDEO_DIR", "/opt/data/videos"), check_dir=False), name="videos")
 
 
 # Explicit PNG route that sets cache-control for compatibility with Mapbox and browsers

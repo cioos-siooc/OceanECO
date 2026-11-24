@@ -57,9 +57,12 @@
                             <!-- <UIcon name="i-mdi-book-open-page-variant" class="size-[32px] text-warning mr-4" /> -->
                             User Guide
                         </div>
-                        <div class="text-muted flex flex-col items-center justify-center pt-8">
-                            <UIcon name="i-mdi-hammer-wrench" class="size-[48px] text-dimmed mb-4" />
-                            <span class="font-light">Under construction - coming soon!</span>
+                        <div class="text-muted pl-4 pr-4" style="line-height: 1.6;">
+                            Twelve short video lessons, each with a written page, walk through the map, sensors,
+                            depth and cross-section views, the analysis tools, and sharing and downloading data.
+                            <div class="pt-4 pb-2">
+                                <UButton to="/guide" icon="i-mdi-book-open-variant" variant="soft">Open the User Guide</UButton>
+                            </div>
                         </div>
                     </div>
                 </div>
