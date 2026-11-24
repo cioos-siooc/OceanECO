@@ -313,6 +313,8 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
 
     const startLocal = windowStartLocal.value.clone();
     const endLocal = windowEndLocal.value.clone();
+    // ~110 px per label keeps 'DD MMM YYYY' from colliding.
+    const xTicks = timeTicks(startLocal, endLocal, props.binMode ?? 'hourly', Math.max(2, Math.floor(chart.getWidth() / 110)));
 
     // Night mark areas
     let markAreaData: any[] = [];
@@ -443,7 +445,19 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
             type: 'time',
             min: startLocal.format(),
             max: endLocal.format(),
-            axisLabel: { color: '#e0e0e0', formatter: (v: any) => moment.parseZone(v).format('DD MMM, HH:mm') }
+            axisTick: { customValues: xTicks },
+            axisLabel: {
+                customValues: xTicks,
+                color: '#e0e0e0',
+                formatter: (v: any) => {
+                    const m = moment.tz(v, APP_TIMEZONE);
+                    const mode = props.binMode ?? 'hourly';
+                    if (mode === 'monthly') return m.format('MMM YYYY');
+                    if (mode === 'daily') return m.format('DD MMM YYYY');
+                    // Hourly: midnight ticks name the day; any other tick only needs the time.
+                    return m.hours() === 0 && m.minutes() === 0 ? m.format('DD MMM') : m.format('HH:mm');
+                }
+            }
         },
         yAxis: {
             type: 'value',
@@ -644,6 +658,32 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
     } else {
         _statsLegendHandler = null;
     }
+}
+
+// ECharts aligns time ticks to the browser's zone (e.g. Edmonton midnight =
+// 23:00 Vancouver), so build them in APP_TIMEZONE: the coarsest-fitting round
+// step no finer than the bin.
+const TICK_STEPS: [number, 'hour' | 'day' | 'month' | 'year'][] = [
+    [1, 'hour'], [3, 'hour'], [6, 'hour'], [12, 'hour'],
+    [1, 'day'], [2, 'day'], [7, 'day'],
+    [1, 'month'], [3, 'month'], [6, 'month'],
+    [1, 'year'], [2, 'year'], [5, 'year'], [10, 'year'],
+];
+function timeTicks(start: moment.Moment, end: moment.Moment, mode: 'hourly' | 'daily' | 'monthly', maxTicks: number): number[] {
+    const steps = TICK_STEPS.slice({ hourly: 0, daily: 4, monthly: 7 }[mode]);
+    let out: number[] = [];
+    for (const [n, unit] of steps) {
+        const t = start.clone().tz(APP_TIMEZONE).startOf(unit);
+        if (unit === 'hour') t.hour(t.hour() - (t.hour() % n));
+        else if (unit === 'month') t.month(t.month() - (t.month() % n));
+        else if (unit === 'year') t.year(t.year() - (t.year() % n));
+        out = [];
+        for (; !t.isAfter(end) && out.length <= maxTicks; t.add(n, unit)) {
+            if (!t.isBefore(start)) out.push(t.valueOf());
+        }
+        if (out.length <= maxTicks) break;
+    }
+    return out;
 }
 
 // The MAP marker's x. Daily/monthly points sit at their bin start, so the
