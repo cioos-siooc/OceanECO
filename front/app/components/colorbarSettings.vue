@@ -109,9 +109,10 @@ const colormapMax = computed({
 
 const variables = computed(() => mainStore.variables);
 
-// Default variable bounds
-const default_colormapMin = computed(() => variables.value.find(v => v.var === selectedVariable.value.var && v.source === selectedVariable.value.source)?.colormapMin ?? 0);
-const default_colormapMax = computed(() => variables.value.find(v => v.var === selectedVariable.value.var && v.source === selectedVariable.value.source)?.colormapMax ?? 1);
+// Variable defaults (bounds + palette)
+const defaultVariable = computed(() => variables.value.find(v => v.var === selectedVariable.value.var && v.source === selectedVariable.value.source));
+const default_colormapMin = computed(() => defaultVariable.value?.colormapMin ?? 0);
+const default_colormapMax = computed(() => defaultVariable.value?.colormapMax ?? 1);
 
 ///////////////////////////////////  RANGE TEXT INPUTS  ///////////////////////////////////
 
@@ -147,12 +148,11 @@ function commitMax() {
 ///////////////////////////////////  METHODS  ///////////////////////////////////
 
 function resetToDefaults() {
-    // Reset adjustable bounds to the variable's default bounds
     mainStore.updateSelectedVariable({
+        colormap: defaultVariable.value?.colormap ?? null,
         colormapMin: default_colormapMin.value,
         colormapMax: default_colormapMax.value
     });
-    sliderEnds.value = [0, 100];
 }
 </script>
 
