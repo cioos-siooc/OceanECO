@@ -97,6 +97,8 @@ function createInitialState() {
         mapCenter: null as { lat: number, lng: number } | null,
 
         snackMessages: [] as Array<{ color: string, text: string }>,
+        // One-off notice about the map layer, shown above selectedInfo.vue.
+        mapLayerNotice: null as string | null,
 
         controlPanel_width: 300,
         isControlPanelOpen: true,
@@ -432,9 +434,9 @@ export const useMainStore = defineStore('main', {
             if (mode !== 'hourly' || !dt || !dts?.length) return;
             const ms = dt.valueOf();
             if (ms >= dts[0]! && ms <= dts[dts.length - 1]!) return;
-            const nearest = dts.reduce((a, b) => Math.abs(b - ms) < Math.abs(a - ms) ? b : a);
-            this.updateSelectedVariable({ dt: moment.utc(nearest) });
-            this.pushSnack({ color: 'info', text: `Hourly data covers only recent months — moved to ${utc2pst(moment.utc(nearest))}.` });
+            const latest = moment.utc(dts[dts.length - 1]!);
+            this.updateSelectedVariable({ dt: latest });
+            this.mapLayerNotice = `Hourly data covers only recent months — moved to the latest, ${utc2pst(latest)}.`;
         },
 
         setExploreWindowEnd(ms: number | null) {

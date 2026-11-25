@@ -1,5 +1,16 @@
 <template>
   <div class="colorbar bg-elevated" style="max-width:200px; width:fit-content;">
+    <UAlert
+      v-if="mapLayerNotice"
+      class="layer-notice"
+      color="warning"
+      variant="solid"
+      icon="i-mdi-alert-outline"
+      :title="mapLayerNotice"
+      :close="true"
+      @update:open="mainStore.mapLayerNotice = null"
+    />
+
     <div class="flex flex-wrap my-0 mx-2 p-0">
       <!-- Says whose depth this is. Without it the box reads as a description
            of whatever the user just clicked, and a sensor at 1257 m sitting
@@ -64,6 +75,14 @@ const outsideDomain = computed(() => mainStore.modelDomain?.inDomain === false);
 
 const mapLayerLoading = computed(() => mainStore.mapLayerLoading);
 
+// Each new notice restarts the auto-dismiss timer.
+const mapLayerNotice = computed(() => mainStore.mapLayerNotice);
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+watch(mapLayerNotice, (text) => {
+  clearTimeout(noticeTimer);
+  if (text) noticeTimer = setTimeout(() => { mainStore.mapLayerNotice = null; }, 10000);
+});
+
 // selected_variable.dt is a real model instant in hourly mode (PST display
 // makes sense there), but a UTC calendar-day/month bin start in daily/monthly
 // mode (see ExplorePanel.vue's onCellClick) — shifting those to PST can roll
@@ -125,6 +144,14 @@ const formattedDt = computed(() => {
 
 @keyframes map-layer-loading {
   to { --loading-angle: 360deg; }
+}
+
+.layer-notice {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 280px;
+  font-family: initial;
 }
 
 .layer-label {
