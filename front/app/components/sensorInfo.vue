@@ -18,7 +18,7 @@
                         :title="`${kindLayerOn ? 'Hide' : 'Show'} ${kind} on the map`"
                         @click="toggleKindLayer" />
                 </div>
-                <div class="flex items-center gap-1">
+                <div v-if="kind !== 'casts'" class="flex items-center gap-1">
                     <UInput v-model="query" icon="i-mdi-magnify" :placeholder="`Search ${kind}`" size="sm" class="grow" />
                     <USelect v-model="sortMode" :items="sortItems" size="xs" variant="ghost"
                         class="sensors__sort" aria-label="Sort" />
@@ -79,7 +79,7 @@
                 <ObsPeriodFilter />
             </div>
 
-            <div v-if="kindCount === 0" class="text-center text-muted p-4 grid gap-2 justify-items-center">
+            <div v-if="kind !== 'casts' && kindCount === 0" class="text-center text-muted p-4 grid gap-2 justify-items-center">
                 <span>No {{ kind }} match{{ kind === 'stations' ? ' your filters' : '' }}.</span>
                 <UButton v-if="otherKindCount" size="xs" variant="outline" color="neutral" @click="searchOtherKind">
                     {{ otherKindCount }} {{ otherKindCount === 1 ? otherKind.slice(0, -1) : otherKind }} match{{ otherKindCount === 1 ? 'es' : '' }}
@@ -135,7 +135,7 @@
 
             <!-- C-PROOF gliders: a deployment moves, so a row shows its
                  mission window and distance flown instead of a depth. -->
-            <div v-else class="sensors__list">
+            <div v-else-if="kind === 'gliders'" class="sensors__list">
                 <div v-for="g in sortedGliders" :key="g.id" :ref="setSensorRef(`glider:${g.id}`)"
                     role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
                     @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
@@ -167,13 +167,10 @@
                 </div>
             </div>
 
-            <!-- DFO IOS ship casts: too many to list (124k since 1930), so
-                 the group counts those in the observation period and
-                 details the selected cast; casts are picked on the map. -->
-            <div v-if="mainStore.castYears.length" class="sensors__casts">
-                <div class="sgroup oe-label">
-                    Ship casts · {{ mainStore.castsTotal.toLocaleString('en-CA') }}
-                </div>
+            <!-- DFO IOS ship casts: too many to list (124k since 1930), so the
+                 tab counts those in the observation period and details the
+                 selected cast; casts are picked on the map. -->
+            <div v-else class="sensors__list">
                 <div v-if="mainStore.castsTruncated" class="cast-period text-xs text-muted">
                     Showing the latest {{ mainStore.casts.length.toLocaleString('en-CA') }} of {{ mainStore.castsTotal.toLocaleString('en-CA') }}; narrow the observation period for the rest.
                 </div>
@@ -196,6 +193,7 @@
                         </div>
                     </div>
                 </div>
+                <div v-else class="text-center text-muted text-sm p-4">Click a cast on the map to see its profile.</div>
             </div>
         </template>
     </div>
@@ -377,10 +375,11 @@ const sortedGliders = computed(() => {
 
 // One tab per instrument kind; the map always shows every kind whose layer is
 // on, whichever tab is open. Selecting on the map switches to the matching tab.
-type Kind = 'stations' | 'gliders';
-const kind = ref<Kind>(mainStore.selectedGliderId ? 'gliders' : 'stations');
+type Kind = 'stations' | 'gliders' | 'casts';
+const kind = ref<Kind>(mainStore.selectedGliderId ? 'gliders' : mainStore.selectedCastId ? 'casts' : 'stations');
+// Search hops only between stations and gliders; casts have no search.
 const otherKind = computed<Kind>(() => (kind.value === 'stations' ? 'gliders' : 'stations'));
-const countOf = (k: Kind) => (k === 'stations' ? filteredSensors.value.length : filteredGliders.value.length);
+const countOf = (k: Kind) => (k === 'stations' ? filteredSensors.value.length : k === 'gliders' ? filteredGliders.value.length : mainStore.castsTotal);
 const kindCount = computed(() => countOf(kind.value));
 
 const query = computed({
@@ -389,7 +388,7 @@ const query = computed({
 });
 // When a search empties this tab, say how many of the other kind it would find.
 const otherKindCount = computed(() => {
-    if (!query.value.trim()) return 0;
+    if (kind.value === 'casts' || !query.value.trim()) return 0;
     return otherKind.value === 'gliders'
         ? glidersMatching(query.value).length
         : mainStore.sensors.filter(s => sensorMatches(s, query.value, organizationFilter.value, variableFilter.value)).length;
@@ -401,20 +400,24 @@ function searchOtherKind() {
     query.value = q;
 }
 
-const layerOn = (k: Kind) => (k === 'stations' ? mainStore.showSensorLayer : mainStore.showGliderLayer);
+const layerOn = (k: Kind) => (k === 'stations' ? mainStore.showSensorLayer : k === 'gliders' ? mainStore.showGliderLayer : mainStore.showCastLayer);
 const kindLayerOn = computed(() => layerOn(kind.value));
 function toggleKindLayer() {
     if (kind.value === 'stations') mainStore.setShowSensorLayer(!mainStore.showSensorLayer);
-    else mainStore.setShowGliderLayer(!mainStore.showGliderLayer);
+    else if (kind.value === 'gliders') mainStore.setShowGliderLayer(!mainStore.showGliderLayer);
+    else mainStore.setShowCastLayer(!mainStore.showCastLayer);
 }
 
-// A tab whose layer is off carries an eye-off, so the state shows from either tab.
-const kindItems = computed(() => (['stations', 'gliders'] as Kind[]).map(k => ({
-    value: k,
-    label: `${k === 'stations' ? 'Stations' : 'Gliders'} · ${countOf(k)}`,
-    icon: layerOn(k) ? undefined : 'i-mdi-eye-off-outline',
-    title: layerOn(k) ? undefined : `${k === 'stations' ? 'Stations' : 'Gliders'} (hidden on the map)`,
-})));
+const kindLabel: Record<Kind, string> = { stations: 'Stations', gliders: 'Gliders', casts: 'Casts' };
+// A tab whose layer is off carries an eye-off, so the state shows from any tab.
+const kindItems = computed(() => (['stations', 'gliders', 'casts'] as Kind[])
+    .filter(k => k !== 'casts' || mainStore.castYears.length)
+    .map(k => ({
+        value: k,
+        label: `${kindLabel[k]} · ${countOf(k).toLocaleString('en-CA')}`,
+        icon: layerOn(k) ? undefined : 'i-mdi-eye-off-outline',
+        title: layerOn(k) ? undefined : `${kindLabel[k]} (hidden on the map)`,
+    })));
 
 /** live: reading within REALTIME_THRESHOLD_MS; historic: active, older data only; inactive. */
 function statusOf(sensor: Sensor): 'live' | 'historic' | 'inactive' {
@@ -512,6 +515,9 @@ watch(() => mainStore.selectedGliderId, (id) => {
     kind.value = 'gliders';
     scrollToRow(`glider:${id}`);
 });
+watch(() => mainStore.selectedCastId, (id) => {
+    if (id) kind.value = 'casts';
+});
 
 ///////////////////////////////// METHODS  ///////////////////////////////////
 
@@ -566,17 +572,6 @@ function openInfoDialog(sensor: typeof mainStore.sensors[number]) {
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
-}
-
-/* Casts aren't a tab: their footer stays under either list. */
-.sensors__casts {
-    flex: none;
-    border-top: 1px solid var(--ui-border-muted);
-}
-
-.sgroup {
-    padding: 10px 14px 6px;
-    border-bottom: 1px solid var(--ui-border-muted);
 }
 
 .cast-period {

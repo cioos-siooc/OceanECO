@@ -33,10 +33,15 @@ function toGeoJSON(casts: ShipCast[]): FeatureCollection {
 
 /**
  * Add the cast layers, or replace their points. Clicking a cast selects it
- * through `onClick`; clicking a cluster zooms to where it splits. Returns a
- * detach function for the listeners (only attached on first add).
+ * through `onClick`; casts stacked on one spot (a station's CTD and bottle
+ * casts share coordinates) go to `onMulti` instead, with the click's screen
+ * point. Clicking a cluster zooms to where it splits. Returns a detach
+ * function for the listeners (only attached on first add).
  */
-export function addCastLayer(map: mapboxgl.Map, casts: ShipCast[], onClick: (id: string) => void): (() => void) | null {
+export function addCastLayer(
+    map: mapboxgl.Map, casts: ShipCast[], onClick: (id: string) => void,
+    onMulti: (ids: string[], x: number, y: number) => void,
+): (() => void) | null {
     const data = toGeoJSON(casts);
     const existing = map.getSource(SOURCE) as mapboxgl.GeoJSONSource | undefined;
     if (existing) {
@@ -84,8 +89,12 @@ export function addCastLayer(map: mapboxgl.Map, casts: ShipCast[], onClick: (id:
     }, before);
 
     const onPoint = (evt: mapboxgl.MapLayerMouseEvent) => {
-        const id = evt.features?.[0]?.properties?.id;
-        if (id) onClick(id);
+        const feats = evt.features ?? [];
+        const at = (f: any) => (f.geometry as Point).coordinates.join();
+        const here = feats[0] && at(feats[0]);
+        const ids = [...new Set(feats.filter(f => at(f) === here).map(f => f.properties?.id as string))].filter(Boolean);
+        if (ids.length > 1) onMulti(ids, evt.point.x, evt.point.y);
+        else if (ids[0]) onClick(ids[0]);
     };
     const onCluster = (evt: mapboxgl.MapLayerMouseEvent) => {
         const f = evt.features?.[0];

@@ -31,6 +31,8 @@ const SELECTED_DIMMED_OPACITY = 0.35;
 const OTHERS_OPACITY = 0.1;
 // Every track but the hovered one, while a deployment is hovered in the sensor list.
 const HOVER_OTHERS_OPACITY = 0.2;
+// Every track while nothing is selected or hovered.
+const IDLE_OPACITY = 0.67;
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 const IMG = { live: 'glider-live', historic: 'glider-historic' } as const;
@@ -128,7 +130,7 @@ export async function addGliderLayer(
         map.addLayer({
             id: LAYER_TRACK_CASING, type: 'line', source: SOURCE_TRACKS,
             layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': 'rgba(0,0,0,0.6)', 'line-width': 4.5 },
+            paint: { 'line-color': 'rgba(0,0,0,0.6)', 'line-width': 4.5, 'line-opacity': IDLE_OPACITY },
         }, before);
         map.addLayer({
             id: LAYER_TRACK, type: 'line', source: SOURCE_TRACKS,
@@ -136,6 +138,7 @@ export async function addGliderLayer(
             paint: {
                 'line-color': ['case', ['get', 'active'], chart.sensor, MUTED],
                 'line-width': 2,
+                'line-opacity': IDLE_OPACITY,
             },
         }, before);
         map.addLayer({
@@ -200,10 +203,11 @@ let selectedBaseOpacity = SELECTED_OPACITY;
 function applyOpacity(map: any) {
     const focus = hoveredId ?? selectedId;
     const others = hoveredId ? HOVER_OTHERS_OPACITY : OTHERS_OPACITY;
-    const opacity = focus ? ['case', ['==', ['get', 'id'], focus], 1, others] : 1;
-    map.setPaintProperty(LAYER_TRACK_CASING, 'line-opacity', opacity);
-    map.setPaintProperty(LAYER_TRACK, 'line-opacity', opacity);
-    map.setPaintProperty(LAYER_HEAD, 'icon-opacity', opacity);
+    const focused = ['case', ['==', ['get', 'id'], focus], 1, others];
+    const trackOpacity = focus ? focused : IDLE_OPACITY;
+    map.setPaintProperty(LAYER_TRACK_CASING, 'line-opacity', trackOpacity);
+    map.setPaintProperty(LAYER_TRACK, 'line-opacity', trackOpacity);
+    map.setPaintProperty(LAYER_HEAD, 'icon-opacity', focus ? focused : 1);
     const hoveringOther = hoveredId && hoveredId !== selectedId;
     map.setPaintProperty(LAYER_TRACK_SELECTED, 'line-opacity', hoveringOther ? HOVER_OTHERS_OPACITY : selectedBaseOpacity);
     map.setPaintProperty(LAYER_TRACK_RANGE, 'line-opacity', hoveringOther ? HOVER_OTHERS_OPACITY : 1);

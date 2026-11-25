@@ -73,8 +73,6 @@ const selectedVariableName = computed(() => mainStore.selected_variable.var);
 
 const showModelLayer = computed(() => mainStore.showModelLayer);
 
-const showCastLayer = computed(() => mainStore.showCastLayer);
-
 const showBathymetryContours = computed(() => mainStore.showBathymetryContours);
 
 const showMapLabels = computed(() => mainStore.showMapLabels);
@@ -99,7 +97,6 @@ const profileIcon = resolveComponent("IconsProfile");
 
 const layerButtons = computed<ToolButton[]>(() => [
   { label: "Model layer", icon: "i-mdi-layers", on: showModelLayer.value, toggle: () => mainStore.setShowModelLayer(!showModelLayer.value) },
-  { label: "Ship casts", icon: "i-mdi-ferry", on: showCastLayer.value, toggle: () => mainStore.setShowCastLayer(!showCastLayer.value) },
   { label: "Bathymetry contours", component: contourIcon, on: showBathymetryContours.value, toggle: () => mainStore.setShowBathymetryContours(!showBathymetryContours.value) },
   { label: "Map labels", icon: "i-mdi-format-text", on: showMapLabels.value, toggle: () => mainStore.setShowMapLabels(!showMapLabels.value) },
   { label: "Satellite imagery", icon: "i-mdi-satellite-variant", on: showSatellite.value, toggle: () => mainStore.setShowSatellite(!showSatellite.value) },

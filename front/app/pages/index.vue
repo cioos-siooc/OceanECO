@@ -82,7 +82,7 @@
         @close="sensorPicker.visible = false"
       />
 
-      <!-- Spiderfy overlay (nearby sensors at different coordinates) -->
+      <!-- Spiderfy overlay: sensors near each other, or casts stacked on one spot -->
       <div
         v-if="spiderfy.visible"
         style="position: absolute; inset: 0; z-index: 5000; pointer-events: all"
@@ -104,9 +104,7 @@
             :y1="spiderfy.centerY"
             :x2="spoke.x"
             :y2="spoke.y"
-            :stroke="
-              spoke.sensor.isRealtime ? 'rgba(92,194,138,0.7)' : 'rgba(125,134,143,0.7)'
-            "
+            :stroke="spoke.line"
             stroke-width="1.5"
           />
           <circle
@@ -123,13 +121,13 @@
           :key="`sn-${i}`"
           class="spiderfy-node"
           :style="{ left: spoke.x + 'px', top: spoke.y + 'px' }"
-          @click.stop="clickSensorFromSpiderfy(spoke.sensor)"
+          @click.stop="spiderfy.visible = false; spoke.pick()"
         >
           <div
             class="spiderfy-dot"
-            :style="{ background: spoke.sensor.isRealtime ? '#5cc28a' : '#13161a' }"
+            :style="{ background: spoke.dot, borderColor: spoke.ring }"
           />
-          <div class="spiderfy-label">{{ spoke.sensor.name }}</div>
+          <div class="spiderfy-label">{{ spoke.label }}</div>
         </div>
       </div>
 
@@ -358,7 +356,7 @@ const spiderfy = ref<{
     visible: boolean;
     centerX: number;
     centerY: number;
-    spokes: Array<{ sensor: MultiSensorCandidate; x: number; y: number }>;
+    spokes: Array<{ label: string; dot: string; ring?: string; line: string; pick: () => void; x: number; y: number }>;
 }>({ visible: false, centerX: 0, centerY: 0, spokes: [] });
 
 // [-126.4002914428711, 46.85966491699218, -121.31835174560548, 51.10480117797852]
@@ -1181,20 +1179,36 @@ function openSensorPicker(sensors: MultiSensorCandidate[], screenX: number, scre
 }
 
 function openSpiderfy(sensors: MultiSensorCandidate[], screenX: number, screenY: number) {
+    showSpiderfy(sensors.map(s => ({
+        label: s.name,
+        dot: s.isRealtime ? '#5cc28a' : '#13161a',
+        line: s.isRealtime ? 'rgba(92,194,138,0.7)' : 'rgba(125,134,143,0.7)',
+        pick: () => clickSensor(s.id, s.depth),
+    })), screenX, screenY);
+}
+
+// Casts at one spot: drawn like their map dots, CTD filled and bottle a ring.
+function openCastSpiderfy(ids: string[], screenX: number, screenY: number) {
+    const casts = ids.map(id => mainStore.casts.find(c => c.id === id)).filter((c): c is ShipCast => !!c);
+    showSpiderfy(casts.map(c => ({
+        label: `${c.kind === 'bottle' ? 'Bottle' : 'CTD'} cast · to ${Math.round(c.maxDepth)} m`,
+        dot: c.kind === 'bottle' ? 'transparent' : chart.sensor,
+        ring: chart.sensor,
+        line: 'rgba(125,134,143,0.7)',
+        pick: () => mainStore.selectCast(c.id),
+    })), screenX, screenY);
+}
+
+function showSpiderfy(items: Array<Omit<typeof spiderfy.value.spokes[number], 'x' | 'y'>>, screenX: number, screenY: number) {
     sensorPicker.value.visible = false;
     const radius = 70;
     const startAngle = -Math.PI / 2;
-    const spokes = sensors.map((sensor, i) => {
-        const angle = startAngle + (2 * Math.PI / sensors.length) * i;
-        return { sensor, x: screenX + radius * Math.cos(angle), y: screenY + radius * Math.sin(angle) };
+    const spokes = items.map((item, i) => {
+        const angle = startAngle + (2 * Math.PI / items.length) * i;
+        return { ...item, x: screenX + radius * Math.cos(angle), y: screenY + radius * Math.sin(angle) };
     });
     spiderfy.value = { visible: true, centerX: screenX, centerY: screenY, spokes };
     map.once('movestart', () => { spiderfy.value.visible = false; });
-}
-
-function clickSensorFromSpiderfy(sensor: MultiSensorCandidate) {
-    spiderfy.value.visible = false;
-    clickSensor(sensor.id, sensor.depth);
 }
 
 function clickSensor(sensor_id: string, depth: number) {
@@ -1260,7 +1274,7 @@ async function loadCasts() {
     const casts = p.diel === 'all' ? r.data.casts
         : r.data.casts.filter((c: ShipCast) => matchesTime(p, Date.parse(c.time), c.lat, c.lon));
     mainStore.setCasts({ ...r.data, casts, total: r.data.total - (r.data.casts.length - casts.length) });
-    const detach = addCastLayer(map, casts, (id) => mainStore.selectCast(id));
+    const detach = addCastLayer(map, casts, (id) => mainStore.selectCast(id), openCastSpiderfy);
     if (detach) _castsDetach = detach;
     setSelectedCast(map, mainStore.selectedCastId);
     setCastLayerVisibility(map, mainStore.showCastLayer);

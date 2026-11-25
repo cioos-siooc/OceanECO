@@ -8,6 +8,18 @@
       </template>
     </GliderSection>
 
+    <!-- A ship cast is one profile at one moment: nothing to draw over time, and
+         the last map point's series would read as the cast's. -->
+    <div v-else-if="mainStore.selectedCastId" class="flex flex-col items-center justify-center grow text-center px-6">
+      <UIcon name="i-mdi-chart-timeline-variant" class="size-[56px] text-gray-500" />
+      <div class="text-gray-500 mt-2">
+        A ship cast is a single profile at one moment, so it has no time series. Its profile is in the panel on the right.
+      </div>
+      <UButton class="mt-3" size="xs" color="neutral" variant="outline" icon="i-mdi-close" @click="mainStore.selectCast(null)">
+        Clear cast
+      </UButton>
+    </div>
+
     <!-- No point picked yet — the whole view is keyed off one map coordinate. -->
     <div v-else-if="!point" class="flex flex-col items-center justify-center grow text-center px-6">
       <UIcon name="i-mdi-layers-search" class="size-[56px] text-gray-500" />
