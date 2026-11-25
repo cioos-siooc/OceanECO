@@ -78,7 +78,7 @@ import Trend from './analysis/Trend.vue'
 import Climatology from './analysis/Climatology.vue'
 import Correlation from './analysis/Correlation.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
-const seasonItems = [{ value: 'full_year', label: 'All' }, { value: 'mam', label: 'MAM' }, { value: 'jja', label: 'JJA' }, { value: 'son', label: 'SON' }, { value: 'djf', label: 'DJF' }]
+const seasonItems = [{ value: 'full_year', label: 'All', title: 'All months' }, { value: 'mam', label: 'MAM', title: 'Spring: March, April, May' }, { value: 'jja', label: 'JJA', title: 'Summer: June, July, August' }, { value: 'son', label: 'SON', title: 'Autumn: September, October, November' }, { value: 'djf', label: 'DJF', title: 'Winter: December, January, February' }]
 const tabItems = [{ value: 'builder', label: 'Overview' }, { value: 'extremes', label: 'Extreme Events' }, { value: 'compound', label: 'Compound Stress' }, { value: 'trend', label: 'Trend' }, { value: 'climatology', label: 'Climatology Anomaly' }, { value: 'correlation', label: 'Correlation' }]
 
 /**

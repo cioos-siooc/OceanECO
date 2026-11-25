@@ -125,7 +125,7 @@ import {
 } from '~~/composables/useComparisonFetch'
 
 const resolutionItems = [{ value: 'hourly', label: '1H', title: 'Hourly · 14-day window' }, { value: 'daily', label: '1D', title: 'Daily · full record' }]
-const seasonItems = [{ value: 'all', label: 'All' }, { value: 'djf', label: 'DJF' }, { value: 'mam', label: 'MAM' }, { value: 'jja', label: 'JJA' }, { value: 'son', label: 'SON' }]
+const seasonItems = [{ value: 'all', label: 'All', title: 'All months' }, { value: 'djf', label: 'DJF', title: 'Winter: December, January, February' }, { value: 'mam', label: 'MAM', title: 'Spring: March, April, May' }, { value: 'jja', label: 'JJA', title: 'Summer: June, July, August' }, { value: 'son', label: 'SON', title: 'Autumn: September, October, November' }]
 
 const props = defineProps<{ active?: boolean }>()
 // The workspace's Scatter/Residuals/Seasonal tabs are derived from exactly these

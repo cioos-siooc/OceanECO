@@ -86,7 +86,7 @@ import ShareButton from './ShareButton.vue'
 import SensorInfoDialog from './SensorInfoDialog.vue'
 import { csvMeta, provideCsvExport, type CsvContext, type CsvDataset } from '~~/composables/useCsvExport'
 import { sensorSourceUrl } from '~~/composables/useSensorDownloadLinks'
-const seasonItems = [{ value: 'all', label: 'All' }, { value: 'mam', label: 'MAM' }, { value: 'jja', label: 'JJA' }, { value: 'son', label: 'SON' }, { value: 'djf', label: 'DJF' }]
+const seasonItems = [{ value: 'all', label: 'All', title: 'All months' }, { value: 'mam', label: 'MAM', title: 'Spring: March, April, May' }, { value: 'jja', label: 'JJA', title: 'Summer: June, July, August' }, { value: 'son', label: 'SON', title: 'Autumn: September, October, November' }, { value: 'djf', label: 'DJF', title: 'Winter: December, January, February' }]
 
 /**
  * Comparison workspace — fullscreen for the same reason Analysis is: it takes a

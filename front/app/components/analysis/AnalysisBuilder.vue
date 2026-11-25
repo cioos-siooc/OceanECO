@@ -109,7 +109,7 @@ import {
 import { csvMeta, useCsvExport, type CsvDataset, type CsvMetaEntry } from '~~/composables/useCsvExport'
 import { useViewState, useChartZoom } from '~~/composables/useViewState'
 
-const seasonItems = [{ value: 'full_year', label: 'All' }, { value: 'mam', label: 'MAM' }, { value: 'jja', label: 'JJA' }, { value: 'son', label: 'SON' }, { value: 'djf', label: 'DJF' }]
+const seasonItems = [{ value: 'full_year', label: 'All', title: 'All months' }, { value: 'mam', label: 'MAM', title: 'Spring: March, April, May' }, { value: 'jja', label: 'JJA', title: 'Summer: June, July, August' }, { value: 'son', label: 'SON', title: 'Autumn: September, October, November' }, { value: 'djf', label: 'DJF', title: 'Winter: December, January, February' }]
 const statItems = [{ value: 'min', label: 'Min' }, { value: 'mean', label: 'Mean' }, { value: 'max', label: 'Max' }]
 
 const props = defineProps<{ active?: boolean; source?: 'model' | 'sensor' }>()
