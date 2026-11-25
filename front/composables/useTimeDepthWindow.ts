@@ -160,20 +160,12 @@ export function useTimeDepthWindow(opts: TimeDepthWindowOptions) {
     function resetWindowToLatest() { windowEnd.value = ceilEnd.value }
     watch([binMode, ...(opts.resetOn ?? [])], resetWindowToLatest, { immediate: true })
 
-    // A plain month/day label was unambiguous while the window was always a
-    // 14-day span within one year, but the wider modes can span a year boundary
-    // (or land almost exactly a year apart), where "Jul 22 – Jul 22" would
-    // misread as a zero-length window — include the year once it stops being
-    // implied. Monthly drops the day entirely: bins are whole months.
-    const rangeLabel = computed(() => {
-        const crossesYear = windowStart.value.getUTCFullYear() !== windowEnd.value.getUTCFullYear()
-        const opts: Intl.DateTimeFormatOptions = binMode.value === 'monthly'
-            ? { month: 'short', year: 'numeric', timeZone: 'UTC' }
-            : { month: 'short', day: 'numeric', timeZone: 'UTC' }
-        if (crossesYear || binMode.value !== 'hourly') opts.year = 'numeric'
-        const fmt = (d: Date) => d.toLocaleDateString('en-US', opts)
-        return `${fmt(windowStart.value)} – ${fmt(windowEnd.value)}`
-    })
+    // formatRange shares the year when both ends agree ("Oct 29 – Nov 12, 2026")
+    // and repeats it across a boundary. Monthly drops the day: bins are whole months.
+    const rangeLabel = computed(() => new Intl.DateTimeFormat('en-US', binMode.value === 'monthly'
+        ? { month: 'short', year: 'numeric', timeZone: 'UTC' }
+        : { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' },
+    ).formatRange(windowStart.value, windowEnd.value))
 
     // ── JUMP-TO-DATE PICKER — pick a day, centre the window on it ───────────
     const dateMenuOpen = ref(false)
