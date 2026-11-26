@@ -1234,7 +1234,7 @@ async function addGliders() {
     });
     (map as any).__glidersDetach?.();
     (map as any).__glidersDetach = detach;
-    setSelectedGlider(map, mainStore.selectedGliderId, !mainStore.showOtherGliders);
+    setSelectedGlider(map, mainStore.selectedGliderId);
     setGliderLayerVisibility(map, mainStore.showGliderLayer);
     updateGliderCurtain();
     updateGliderSeafloor();
@@ -1417,9 +1417,8 @@ watch(() => mainStore.gliderTiltToken, () => {
     map.fitBounds(bounds, { bearing, pitch: GLIDER_TILT_PITCH, padding: 60, maxZoom: 10, duration: 1200 });
 });
 
-watch(() => mainStore.showOtherGliders, (show: boolean) => setSelectedGlider(map, mainStore.selectedGliderId, !show));
 watch(() => mainStore.selectedGliderId, (id) => {
-    setSelectedGlider(map, id, !mainStore.showOtherGliders);
+    setSelectedGlider(map, id);
     // Offshore tracks often sit outside the Salish Sea view: bring the whole track in.
     const g = mainStore.gliders.find(d => d.id === id);
     if (!g || !map) return;

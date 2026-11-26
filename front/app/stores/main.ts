@@ -1,5 +1,6 @@
 import type moment from 'moment';
 import { defineStore } from 'pinia'
+import { markRaw } from 'vue';
 import { chart as chartPalette } from '@/config/palette';
 import { trackEvent } from '~~/composables/useAnalytics';
 import { mergeSensors, resolveMergedId, type MergeableSensor } from '@/utils/sensorMerge';
@@ -189,8 +190,6 @@ function createInitialState() {
         gliderTiltToken: 0,
         // 3D seafloor under the curtain (useGliderCurtain.ts).
         showSeafloor: true,
-        // With a glider selected, the other tracks are faded; false hides them.
-        showOtherGliders: true,
         // DFO IOS ship casts (`GET /casts`): those matching the observation
         // period, latest first; the archive (124k casts since 1930) is capped
         // at the API's MAX_CASTS, and `castsTotal` says how many matched.
@@ -563,7 +562,8 @@ export const useMainStore = defineStore('main', {
             }
         },
         setGliders(gliders: GliderDeployment[]) {
-            this.gliders = gliders;
+            // Raw: replaced whole, never edited, and clipping ~23k track points through proxies took 45 ms.
+            this.gliders = markRaw(gliders);
         },
         /** Select a glider deployment (or clear with null) and show its section. */
         selectGlider(id: string | null) {
@@ -588,9 +588,6 @@ export const useMainStore = defineStore('main', {
         },
         setShowSeafloor(value: boolean) {
             this.showSeafloor = value;
-        },
-        setShowOtherGliders(value: boolean) {
-            this.showOtherGliders = value;
         },
         setSensorSearchQuery(query: string) {
             this.sensorSearchQuery = query;

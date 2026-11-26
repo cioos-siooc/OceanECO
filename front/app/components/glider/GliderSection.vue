@@ -10,9 +10,6 @@
       <UButton size="xs" variant="outline" color="neutral" :class="mainStore.showSeafloor ? 'oe-on' : ''"
         :aria-pressed="mainStore.showSeafloor" title="Show the seafloor around the track when the map is tilted"
         @click="mainStore.setShowSeafloor(!mainStore.showSeafloor)">Seafloor</UButton>
-      <UButton size="xs" variant="outline" color="neutral" :class="mainStore.showOtherGliders ? 'oe-on' : ''"
-        :aria-pressed="mainStore.showOtherGliders" title="Show the other glider tracks, faded, or only this one"
-        @click="mainStore.setShowOtherGliders(!mainStore.showOtherGliders)">Other tracks</UButton>
       <UButton v-if="mainStore.gliderRange" size="xs" variant="ghost" color="neutral" icon="i-mdi-arrow-expand-horizontal"
         title="Zoom back out to the whole deployment" @click="mainStore.setGliderRange(null)">Whole track</UButton>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
