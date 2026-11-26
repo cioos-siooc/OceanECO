@@ -14,7 +14,7 @@ RUN groupadd -g 1000 appuser \
     && useradd -u 1000 -g 1000 -m -s /bin/bash appuser
 
 COPY sensors/pyproject.toml ./
-RUN uv sync --no-dev
+RUN uv sync --no-dev --no-cache
 
 COPY sensors/*.py ./
 COPY sensors/catalog_*.yml ./
