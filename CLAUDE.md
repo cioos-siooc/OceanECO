@@ -29,7 +29,7 @@ docker compose -f docker-compose.dev.yml --env-file .env.dev up
 **Always pass `--env-file`** (dev and prod). Without it, dev falls back to in-file defaults (front 3000, api 4000) and recreates dependent services on wrong ports; prod compose files `:?`-require `PREFECT_API_URL` and fail.
 
 ```bash
-cd front && npm run dev | npm run build | npm run lint
+cd front && npm run dev | npm run build | npm run lint   # lint errors fail CI (.github/workflows/lint.yml)
 cd api && pytest tests/                      # or a single file, e.g. tests/test_extract_timeseries_all.py
 docker compose -f docker-compose.dev.yml exec db-ch clickhouse-client --query "SHOW TABLES"
 ./deploy.sh dev | prod                       # frontend → dev / master branch
