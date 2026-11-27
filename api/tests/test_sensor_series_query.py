@@ -37,7 +37,7 @@ def test_merged_query_takes_one_value_per_key():
 
 def test_instrument_query_filters_to_that_source():
     q = series_query(FakeClient(CRIP), "id", "temperature", "CRIP.C1/CTD", "x = 1", keys="time", columns="time, value")
-    assert "source = 'CRIP.C1/CTD'" in q and "argMin" not in q
+    assert "source = {inst:String}" in q and "argMin" not in q
 
 
 # ── Display-time merges (comma-joined ids) ─────────────────────────────────────
@@ -68,7 +68,7 @@ class RowsClient:
     def __init__(self, rows):
         self.rows, self.queries = rows, []
 
-    def query(self, q):
+    def query(self, q, parameters=None):
         self.queries.append(q)
         rows = self.rows
 
@@ -91,3 +91,30 @@ def test_merged_series_without_depth_omits_it(monkeypatch):
     monkeypatch.setattr(est, "get_ch_client", lambda: client)
     out = est.extract_sensor_timeseries("a,b", "temperature", "2022-01-01", "2022-01-02")
     assert "depth" not in out and out["value"] == [9.0]
+
+
+# ── Request strings never reach the SQL text ──────────────────────────────────
+
+import pytest
+
+HOSTILE = "x\\' OR 1=1 --"  # a backslash-escaped quote closes a ''-doubled string
+
+
+@pytest.mark.parametrize("depth", [None, 5.0])
+def test_request_strings_are_bound_or_stripped(monkeypatch, depth):
+    seen = []
+
+    class Recorder:
+        def query(self, q, parameters=None):
+            seen.append((q, parameters or {}))
+            class R:
+                result_rows = []
+            return R
+
+    monkeypatch.setattr(est, "get_ch_client", lambda: Recorder())
+    with pytest.raises(FileNotFoundError):
+        # A trailing backslash in the id would escape its closing quote.
+        est.extract_sensor_timeseries(
+            "abc\\", HOSTILE, "2024-01-01", "2024-01-02", depth=depth, instrument=HOSTILE)
+    assert seen and all("OR 1=1" not in q and "\\" not in q for q, _ in seen)
+    assert any(p.get("v") == HOSTILE and p.get("inst") == HOSTILE for _, p in seen)

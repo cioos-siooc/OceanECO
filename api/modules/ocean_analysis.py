@@ -13,6 +13,9 @@ import logging
 from typing import List, Tuple
 
 from modules.clickhouse_helpers import get_ch_client as _get_ch_client
+from modules.extractTimeseries import ALLOWED_VARIABLES
+
+DAILY_STATS = {"mean", "min", "max"}
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +136,9 @@ def query_region_timeseries(
 
     Returns: {"data": [{"time": "YYYY-MM-DD", "value": ...}, ...]}
     """
+    # Both go into the SQL as a column name, so only known values pass.
+    if variable not in ALLOWED_VARIABLES or stat not in DAILY_STATS:
+        raise ValueError(f"Unknown variable/stat '{variable}'/'{stat}'.")
     column_name = f"{variable}_{stat}"
 
     client = _get_ch_client()

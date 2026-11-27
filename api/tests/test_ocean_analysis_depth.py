@@ -45,3 +45,13 @@ def test_resolve_nearest_depth_out_of_tolerance_returns_none():
 def test_resolve_nearest_depth_no_data_returns_none():
     fake = FakeClient(depths=[])
     assert _resolve_nearest_depth(fake, 10, 20, 5.0) is None
+
+
+@pytest.mark.parametrize("variable, stat", [
+    ("temperature_mean), (SELECT 1", "mean"),
+    ("temperature", "mean) FROM system.users --"),
+])
+def test_region_timeseries_rejects_unknown_columns(monkeypatch, variable, stat):
+    monkeypatch.setattr(ocean_analysis, "_get_ch_client", lambda: pytest.fail("queried the database"))
+    with pytest.raises(ValueError):
+        ocean_analysis.query_region_timeseries([(1, 2)], 0.5, variable, stat, [2020, 2021])
