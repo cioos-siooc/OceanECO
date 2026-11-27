@@ -21,7 +21,6 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
 
 // The parent drives this: `<howTo v-model="showHow" />` in pages/index.vue, set
 // by the overlay's @show-how. Previously this was a local `ref(true)` and the

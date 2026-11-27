@@ -222,12 +222,12 @@ export async function addGliderLayer(
                 map.off('click', layer, handler);
                 map.off('mouseenter', layer, enter);
                 map.off('mouseleave', layer, leave);
-            } catch (e) { }
+            } catch { /* best-effort: the map, layer or chart may already be gone */ }
         }
         try {
             map.off('mousemove', LAYER_HEAD, headMove);
             map.off('mouseleave', LAYER_HEAD, headLeave);
-        } catch (e) { }
+        } catch { /* best-effort: the map, layer or chart may already be gone */ }
     };
 }
 

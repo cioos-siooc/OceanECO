@@ -72,7 +72,7 @@ export function useStationsInteraction(
         // Spiderfy this station's own sensors (same-position depth variants and its
         // sub-100 m grouped members) — consistently, whatever the count.
         onSpiderfyClick(sensors, x, y);
-      } catch (e) {
+      } catch {
         // swallow
       }
     });
@@ -84,17 +84,17 @@ export function useStationsInteraction(
         if (!feature) return;
         const rawActive = feature.properties?.active;
         if (_isActive(rawActive)) map.getCanvas().style.cursor = 'pointer';
-      } catch (e) {}
+      } catch { /* best-effort: the map, layer or chart may already be gone */ }
     });
 
     const offLeave = circle.on('mouseleave', () => {
-      try { map.getCanvas().style.cursor = ''; } catch (e) {}
+      try { map.getCanvas().style.cursor = ''; } catch { /* best-effort: the map, layer or chart may already be gone */ }
     });
 
     _detach = () => {
-      try { if (offClick) offClick(); } catch (e) {}
-      try { if (offEnter) offEnter(); } catch (e) {}
-      try { if (offLeave) offLeave(); } catch (e) {}
+      try { if (offClick) offClick(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+      try { if (offEnter) offEnter(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+      try { if (offLeave) offLeave(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
       _detach = null;
     };
 

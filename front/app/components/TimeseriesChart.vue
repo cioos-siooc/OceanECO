@@ -149,10 +149,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
     if (chart && zrClickHandler) {
-        try { chart.getZr().off('click', zrClickHandler); } catch (e) { }
+        try { chart.getZr().off('click', zrClickHandler); } catch { /* best-effort: the map, layer or chart may already be gone */ }
     }
     if (chart) {
-        try { chart.dispose(); } catch (e) { }
+        try { chart.dispose(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
         chart = null;
     }
 });
@@ -162,7 +162,7 @@ onBeforeUnmount(() => {
 function initChart() {
     if (!chartContainer.value) return;
 
-    try { if (chart) { chart.dispose(); chart = null; } } catch (e) { }
+    try { if (chart) { chart.dispose(); chart = null; } } catch { /* best-effort: the map, layer or chart may already be gone */ }
     chart = echarts.init(chartContainer.value, 'dark', { renderer: 'canvas' });
 
     chart.setOption({
@@ -722,7 +722,7 @@ watch(() => mainStore.selected_variable.dt, (newDt) => {
                 }
             }]
         });
-    } catch (e) { /* ignore if chart has no series yet */ }
+    } catch { /* ignore if chart has no series yet */ }
 });
 
 // Resize chart when container changes size

@@ -31,14 +31,14 @@ export function computeNightRanges(opts: {
     try {
       const times = SunCalc.getTimes(dayDate, lat, lng)
       sunset = times.sunset || null
-    } catch (e) {
+    } catch {
       sunset = null
     }
     try {
       const nextDayDate = day.clone().add(1, 'day').toDate()
       const times2 = SunCalc.getTimes(nextDayDate, lat, lng)
       sunriseNext = times2.sunrise || null
-    } catch (e) {
+    } catch {
       sunriseNext = null
     }
 

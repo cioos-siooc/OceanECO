@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef, ref, watch } from 'vue';
+import { computed } from 'vue';
 import moment from 'moment';
 
 import { useMainStore } from '../stores/main'
@@ -36,11 +36,6 @@ const mainStore = useMainStore();
 const { variableLabel } = useVariableRegistry()
 
 ////////////////////////////////////// COMPUTED //////////////////////////////////////
-
-const showColorbarSettings = computed({
-  get: () => mainStore.showColorbarSettings,
-  set: (val: boolean) => mainStore.setShowColorbarSettings(val)
-});
 
 const selectedVariable = computed(() => mainStore.selected_variable);
 

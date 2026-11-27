@@ -18,7 +18,7 @@ export function applyBasemapPaint(map: mapboxgl.Map | null) {
     for (const [id, paint] of Object.entries(BASEMAP_PAINT)) {
         if (!map.getLayer(id)) continue;
         for (const [prop, value] of Object.entries(paint)) {
-            try { map.setPaintProperty(id, prop, value); } catch (e) { /* layer type mismatch */ }
+            try { map.setPaintProperty(id, prop, value); } catch { /* layer type mismatch */ }
         }
     }
 }
@@ -80,7 +80,7 @@ export function raiseWaterNamesLayer(map: mapboxgl.Map | null) {
         if (layers[layers.length - 1].id !== layerId) {
             map.moveLayer(layerId);
         }
-    } catch (e) { /* map may be mid-teardown */ }
+    } catch { /* map may be mid-teardown */ }
 }
 
 // Base style's "Place labels" group (settlement/state/country/continent
@@ -105,7 +105,7 @@ export function setMapLabelsVisibility(map: mapboxgl.Map | null, visible: boolea
     for (const id of targetIds) {
         try {
             if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility);
-        } catch (e) { /* layer not present in this style version */ }
+        } catch { /* layer not present in this style version */ }
     }
 }
 

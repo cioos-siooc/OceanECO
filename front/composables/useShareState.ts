@@ -117,14 +117,9 @@ function round(n: number, dp = 5): number {
 
 /** Drop empty strings/arrays/objects and nulls so they don't cost bytes. */
 function prune<T extends Record<string, any>>(obj: T): T {
-    for (const k of Object.keys(obj)) {
-        const val = obj[k]
-        if (val === undefined || val === null) { delete obj[k]; continue }
-        if (typeof val === 'string' && val === '') { delete obj[k]; continue }
-        if (Array.isArray(val) && val.length === 0) { delete obj[k]; continue }
-        if (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0) delete obj[k]
-    }
-    return obj
+    const isEmpty = (val: any) => val === undefined || val === null || val === ''
+        || (Array.isArray(val) ? val.length === 0 : typeof val === 'object' && Object.keys(val).length === 0)
+    return Object.fromEntries(Object.entries(obj).filter(([, val]) => !isEmpty(val))) as T
 }
 
 /** Deep-copy the view-state bag, dropping scopes that hold nothing. */

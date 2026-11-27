@@ -198,13 +198,6 @@ const varName = computed(() =>
 )
 const varUnit = computed(() => variable.value ? displayUnit(variable.value) : '')
 
-const pointLabel = computed(() => {
-  if (isSensor.value) return sensorInfo.value?.name ?? ''
-  const pt = lastClicked.value
-  if (!pt) return ''
-  return queryMode.value === 'area' ? `~${pt.lat.toFixed(2)}, ${pt.lng.toFixed(2)} (area)` : `${pt.lat.toFixed(3)}, ${pt.lng.toFixed(3)}`
-})
-
 
 const seasonLabel = computed(() => {
   const labels: Record<string, string> = {

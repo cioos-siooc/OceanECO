@@ -67,7 +67,7 @@ ref="sensorPanel" label="SENSOR &#183; BINNED" :depths="shownDepths" :values="sh
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useMainStore, formatDepthLabel } from '../../stores/main'
-import { fetchDepthProfile, parseCoverageBound, asOutsideDomainError, type DepthProfileResponse, type OutsideDomainError, dataDepthCount } from '~~/composables/useDepthProfileFetch'
+import { fetchDepthProfile, asOutsideDomainError, type DepthProfileResponse, type OutsideDomainError, dataDepthCount } from '~~/composables/useDepthProfileFetch'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
 import { BIN_CONFIG, useTimeDepthWindow, toApiIso, nearestLevelIdx, type BinMode } from '~~/composables/useTimeDepthWindow'

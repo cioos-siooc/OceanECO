@@ -153,7 +153,7 @@ export function useMapDrawTools(
         // The point-click marker and the cross-section line/vertices are mutually
         // exclusive map decorations — only one mode's input should be visible at a time.
         if (tab === 'crossSection' || tab === 'area') {
-            try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
+            try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
         } else if (lastClicked.value) {
             triggerMapClick(lastClicked.value.lat, lastClicked.value.lng);
         }
@@ -290,9 +290,9 @@ export function useMapDrawTools(
     function detachDrawTools() {
         const map = getMap();
         if (!map) return;
-        try { if (map.getLayer(ABOX_FILL)) map.removeLayer(ABOX_FILL); } catch (e) { }
-        try { if (map.getLayer(ABOX_LINE)) map.removeLayer(ABOX_LINE); } catch (e) { }
-        try { if (map.getSource(ABOX_SOURCE)) map.removeSource(ABOX_SOURCE); } catch (e) { }
+        try { if (map.getLayer(ABOX_FILL)) map.removeLayer(ABOX_FILL); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getLayer(ABOX_LINE)) map.removeLayer(ABOX_LINE); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getSource(ABOX_SOURCE)) map.removeSource(ABOX_SOURCE); } catch { /* best-effort: the map, layer or chart may already be gone */ }
     }
 
     return { attachDrawTools, detachDrawTools };

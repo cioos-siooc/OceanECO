@@ -9,9 +9,7 @@
       class="grow"
       :style="{ position: 'relative', height: `calc(100% - ${footerHeight})`, '--nav-ctrl-right': (drawerOpen ? 300 : 0) + 'px' }"
     >
-      <!-- <Layers @toggleLayer="onToggleLayer" /> -->
-
-      <Overlays
+      <MapOverlays
         class="overlay"
         :style="{
           top: `${overlayGap}px`,
@@ -476,21 +474,21 @@ onBeforeUnmount(() => {
         map.off('error', onPngSourceSettled);
         map.off('moveend', publishMapView);
         // detach station handlers if attached
-        try { const sd = (map as any).__stationsDetach; if (sd) sd(); } catch (e) { }
+        try { const sd = (map as any).__stationsDetach; if (sd) sd(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
         detachCasts();
 
         // remove png overlay if present
-        try { if (map.getLayer && map.getLayer('png-image-layer')) map.removeLayer('png-image-layer'); } catch (e) { }
-        try { if (map.getSource && map.getSource('png-image')) map.removeSource('png-image'); } catch (e) { }
-        try { const ov = (map as any).__activePngOverlay; if (ov && ov.clickHandler) map.off('click', ov.clickHandler); } catch (e) { }
-        try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
+        try { if (map.getLayer && map.getLayer('png-image-layer')) map.removeLayer('png-image-layer'); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getSource && map.getSource('png-image')) map.removeSource('png-image'); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { const ov = (map as any).__activePngOverlay; if (ov && ov.clickHandler) map.off('click', ov.clickHandler); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
 
         detachDrawTools();
 
         // remove stations layers + source if present
-        try { if (map.getLayer && map.getLayer('stations-badge')) map.removeLayer('stations-badge'); } catch (e) { }
-        try { if (map.getLayer && map.getLayer('stations-circles')) map.removeLayer('stations-circles'); } catch (e) { }
-        try { if (map.getSource && map.getSource('stations-points')) map.removeSource('stations-points'); } catch (e) { }
+        try { if (map.getLayer && map.getLayer('stations-badge')) map.removeLayer('stations-badge'); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getLayer && map.getLayer('stations-circles')) map.removeLayer('stations-circles'); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getSource && map.getSource('stations-points')) map.removeSource('stations-points'); } catch { /* best-effort: the map, layer or chart may already be gone */ }
 
         map.remove();
     }
@@ -507,7 +505,7 @@ onBeforeUnmount(() => {
 // the image fetch. One watcher covering every source that can move the
 // overlay collapses that to a single call no matter how many of them changed
 // at once.
-watch(() => [mainStore.selected_variable.source, mainStore.selected_variable.var, mainStore.selected_variable.depth, mainStore.selected_variable.dt, mainStore.midDate], async ([v, depth]: [string, string, string | null, moment.Moment | null, moment.Moment | null]) => {
+watch(() => [mainStore.selected_variable.source, mainStore.selected_variable.var, mainStore.selected_variable.depth, mainStore.selected_variable.dt, mainStore.midDate], async ([, v]: [string, string, string | null, moment.Moment | null, moment.Moment | null]) => {
     if (!map) return;
 
     if (!v) {
@@ -716,7 +714,7 @@ function onMapClick(evt: any) {
 function trigger_mapClick(lat: number, lng: number) {
     const overlay = (map as any).__activePngOverlay;
     if (!overlay) return;
-    try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
+    try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
     if (mainStore.queryMode === 'point') {
         const el = document.createElement('div');
         el.className = 'map-click-marker';

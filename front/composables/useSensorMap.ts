@@ -107,7 +107,7 @@ export function useSensorMap(getMap: () => mapboxgl.Map | null, apiBaseUrl: stri
         const expr: any = (!selectedVar || keysWithVar.length === _visibleSensorGroups.length)
             ? 0.95
             : ['case', ['in', ['get', 'coordKey'], ['literal', keysWithVar]], 0.95, 0.2];
-        try { (map as any).setPaintProperty(STATIONS_LAYER_ID, 'icon-opacity', expr); } catch (_) { }
+        try { (map as any).setPaintProperty(STATIONS_LAYER_ID, 'icon-opacity', expr); } catch { /* best-effort: the map, layer or chart may already be gone */ }
     }
 
     // Recomputes which station groups are visible on the map from mainStore.filteredSensors

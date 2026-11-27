@@ -58,7 +58,7 @@ export function setBuoyLayerVisibility(map: any, visible: boolean) {
     if (!map) return;
     const visibility = visible ? 'visible' : 'none';
     for (const id of BUOY_LAYER_IDS) {
-        try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility); } catch (e) { }
+        try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility); } catch { /* best-effort: the map, layer or chart may already be gone */ }
     }
 }
 const IMG = {
@@ -151,12 +151,12 @@ export async function addBuoyLayer(
     ]);
 
     // Remove existing layers/source before re-adding
-    try { if (map.getLayer(LAYER_HOVER_ID)) map.removeLayer(LAYER_HOVER_ID); } catch (e) { }
-    try { if (map.getLayer(LAYER_HOVER_GLOW_ID)) map.removeLayer(LAYER_HOVER_GLOW_ID); } catch (e) { }
-    try { if (map.getLayer(LAYER_SELECTED_ID)) map.removeLayer(LAYER_SELECTED_ID); } catch (e) { }
-    try { if (map.getLayer(LAYER_BADGE_ID)) map.removeLayer(LAYER_BADGE_ID); } catch (e) { }
-    try { if (map.getLayer(STATIONS_LAYER_ID)) map.removeLayer(STATIONS_LAYER_ID); } catch (e) { }
-    try { if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID); } catch (e) { }
+    try { if (map.getLayer(LAYER_HOVER_ID)) map.removeLayer(LAYER_HOVER_ID); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+    try { if (map.getLayer(LAYER_HOVER_GLOW_ID)) map.removeLayer(LAYER_HOVER_GLOW_ID); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+    try { if (map.getLayer(LAYER_SELECTED_ID)) map.removeLayer(LAYER_SELECTED_ID); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+    try { if (map.getLayer(LAYER_BADGE_ID)) map.removeLayer(LAYER_BADGE_ID); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+    try { if (map.getLayer(STATIONS_LAYER_ID)) map.removeLayer(STATIONS_LAYER_ID); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+    try { if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID); } catch { /* best-effort: the map, layer or chart may already be gone */ }
 
     map.addSource(SOURCE_ID, { type: 'geojson', data: geojson });
     map.addLayer({
@@ -238,7 +238,7 @@ export async function addBuoyLayer(
     const layerAdapter = {
         on: (event: string, handler: (evt: any) => void) => {
             map.on(event, STATIONS_LAYER_ID, handler);
-            return () => { try { map.off(event, STATIONS_LAYER_ID, handler); } catch (e) { } };
+            return () => { try { map.off(event, STATIONS_LAYER_ID, handler); } catch { /* best-effort: the map, layer or chart may already be gone */ } };
         },
     };
 

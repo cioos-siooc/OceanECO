@@ -60,8 +60,7 @@ import { useMainStore } from "../stores/main";
 const mainStore = useMainStore();
 
 const emit = defineEmits<{
-  (e: "show-how"): void;
-  (e: "autorange"): void;
+  (e: "show-how" | "autorange"): void;
 }>();
 
 ////////////////////////////////////// COMPUTED //////////////////////////////////////
@@ -117,9 +116,6 @@ function autorange() {
   emit("autorange");
 }
 
-const showHow = () => {
-  emit("show-how");
-};
 </script>
 
 <style scoped>

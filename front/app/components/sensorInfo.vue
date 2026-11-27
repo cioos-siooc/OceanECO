@@ -214,15 +214,6 @@ v-if="selectedCast" class="srow srow--on" role="button" tabindex="0"
 
 
     <!-- DIALOGS -->
-    <!-- DEPTH PICKER (reserved for future variable-depth/profiler sensors) -->
-
-    <!-- HEATMATP -->
-    <UModal v-model:open="showHeatmapDialog" :ui="{ content: 'max-w-[85vw]' }">
-        <template #content>
-            <HeatmapChart :sensor-id="heatmap_sensorId" :model-variable="heatmap_variable" />
-        </template>
-    </UModal>
-
     <!-- SENSOR INFO -->
     <SensorInfoDialog v-model:open="showInfoDialog" :sensor="infoDialogSensor" />
 </template>
@@ -494,18 +485,6 @@ function gliderRange(g: GliderDeployment): string {
     return `${fmt(g.start)} – ${fmt(g.end)}`;
 }
 
-const depthDialogSensor = ref<typeof mainStore.sensors[number] | null>(null);
-const depthDialogOpen = computed({
-    get: () => depthDialogSensor.value !== null,
-    set: (v) => { if (!v) depthDialogSensor.value = null; }
-});
-
-const showHeatmapDialog = ref(false);
-const heatmap_sensorId = ref<string | null>(null);
-const heatmap_variable = computed(() => mainStore.selected_variable?.var ?? null);
-const heatmap_minDate = ref<string | null>(null);
-const heatmap_maxDate = ref<string | null>(null);
-
 const showInfoDialog = ref(false);
 const infoDialogSensor = ref<typeof mainStore.sensors[number] | null>(null);
 
@@ -550,12 +529,6 @@ function selectSensor(sensorID: string) {
         mainStore.setLastClickedMapPoint({ lat: sensor.latitude, lng: sensor.longitude });
         mainStore.setMapCenter({ lat: sensor.latitude, lng: sensor.longitude });
     }
-}
-
-function openHeatmapDialog(sensorId: string) {
-    const sensor = sensors.value.find(s => s.id === sensorId);
-    heatmap_sensorId.value = sensorId;
-    showHeatmapDialog.value = true;
 }
 
 function openInfoDialog(sensor: typeof mainStore.sensors[number]) {

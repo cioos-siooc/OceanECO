@@ -153,7 +153,7 @@ export function useModelRasterLayer(
         // remove previous click handler if present
         const prev = (map as any).__activePngOverlay;
         if (prev && prev.clickHandler) {
-            try { map.off('click', prev.clickHandler); } catch (e) { }
+            try { map.off('click', prev.clickHandler); } catch { /* best-effort: the map, layer or chart may already be gone */ }
         }
         (map as any).__activePngOverlay = overlayObj;
 
@@ -164,11 +164,11 @@ export function useModelRasterLayer(
     function removePngOverlay(sourceId = 'png-image', layerId = 'png-image-layer') {
         const map = getMap();
         if (!map) return;
-        try { const ov = (map as any).__activePngOverlay; if (ov && ov.clickHandler) map.off('click', ov.clickHandler); } catch (e) { }
-        try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
-        try { if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId); } catch (e) { }
-        try { if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId); } catch (e) { }
-        try { delete (map as any).__activePngOverlay; } catch (e) { }
+        try { const ov = (map as any).__activePngOverlay; if (ov && ov.clickHandler) map.off('click', ov.clickHandler); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+        try { delete (map as any).__activePngOverlay; } catch { /* best-effort: the map, layer or chart may already be gone */ }
     }
 
     // Bathymetry tiles are packed from -3000 m.
@@ -244,9 +244,9 @@ export function useModelRasterLayer(
 
             const { sourceId = 'bathymetry-tiles', layerId = 'bathymetry-tiles-layer' } = bathy;
 
-            try { if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId); } catch (e) { }
-            try { if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId); } catch (e) { }
-            try { delete (map as any).__activeBathymetryLayer; } catch (e) { }
+            try { if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+            try { if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId); } catch { /* best-effort: the map, layer or chart may already be gone */ }
+            try { delete (map as any).__activeBathymetryLayer; } catch { /* best-effort: the map, layer or chart may already be gone */ }
         } catch (e) {
             console.error('Error removing bathymetry tiles layer:', e);
         }

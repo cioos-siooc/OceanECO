@@ -62,7 +62,7 @@ const mainStore = useMainStore();
 // picked date — this icon would be a second, redundant way to do the same
 // thing there. Cross-Section has no such control of its own, so it keeps this
 // as its only way to jump to an arbitrary date.
-const props = defineProps<{ hideDatePicker?: boolean }>()
+defineProps<{ hideDatePicker?: boolean }>()
 
 const playing = ref(false);
 const datePickerOpen = ref(false);
@@ -196,7 +196,7 @@ function startTimer() {
   stopTimer();
   const interval = Math.max(50, baseInterval / (speed.value || 1));
   timer = window.setInterval(() => {
-    stepForward() || togglePlay();
+    if (!stepForward()) togglePlay();
   }, interval) as unknown as number;
 }
 function stopTimer() {
