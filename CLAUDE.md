@@ -24,7 +24,7 @@ Prefect is **prod-only**: both schedulers report to the shared https://pipelines
 ```bash
 docker compose -f docker-compose.dev.yml --env-file .env.dev up
 ```
-**Always pass `--env-file`** (dev and prod). Without it, dev falls back to in-file defaults (front 3000, api 4000) and recreates dependent services on wrong ports; prod compose files `:?`-require `PREFECT_API_URL` and fail.
+**Always pass `--env-file`** (dev and prod). Without it, dev falls back to in-file defaults (front 3000, api 4000) and recreates dependent services on wrong ports; prod compose files `:?`-require `PREFECT_API_URL` and fail. Env files are gitignored; start from the committed `.env.dev.example` / `.env.prod.api.example` / `.env.process.remote.example` (keep them in sync when adding a variable).
 
 ```bash
 cd front && npm run dev | npm run build | npm run lint

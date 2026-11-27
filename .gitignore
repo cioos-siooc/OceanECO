@@ -12,6 +12,7 @@ build/
 *.log
 .env
 .env.*
+!.env.*.example
 .venv/
 venv/
 .ipynb_checkpoints/
