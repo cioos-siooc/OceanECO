@@ -158,7 +158,7 @@ import moment from 'moment'
 import { useMainStore, formatDepthLabel } from '../stores/main'
 import { fetchDepthProfile, parseCoverageBound, asOutsideDomainError, type DepthProfileResponse, type OutsideDomainError, dataDepthCount } from '~~/composables/useDepthProfileFetch'
 import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
-import { BIN_CONFIG, useTimeDepthWindow, toApiIso, binSeries, floorToBin, type BinMode } from '~~/composables/useTimeDepthWindow'
+import { BIN_CONFIG, useTimeDepthWindow, toApiIso, binSeries, floorToBin, nearestLevelIdx, type BinMode } from '~~/composables/useTimeDepthWindow'
 import { fetchClimateTimeseries } from '~~/composables/useClimateTimeseries'
 import { getSensorTimeseries, sensorInstruments } from '~~/composables/useSensorTimeseries'
 import { useViewState } from '~~/composables/useViewState'
@@ -446,11 +446,6 @@ const emptyCellLabel = computed(() => showingSensor.value ? 'no cast in this bin
 
 
 
-function nearestLevelIdx(depth: number, levels: number[]) {
-  let best = 0, bestDist = Infinity
-  levels.forEach((d, i) => { const dist = Math.abs(d - depth); if (dist < bestDist) { bestDist = dist; best = i } })
-  return best
-}
 
 function applyResponse(resp: DepthProfileResponse) {
   const timeIndex = new Map<number, number>()

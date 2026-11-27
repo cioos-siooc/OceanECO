@@ -74,8 +74,8 @@ import moment from 'moment'
 import { useMainStore, formatDepthLabel } from '../../stores/main'
 import { fetchCrossSection, type CrossSectionResponse } from '~~/composables/useCrossSectionFetch'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
-import { resolveColormap } from '~~/composables/useColormapResolver'
-import { BIN_CONFIG, type BinMode } from '~~/composables/useTimeDepthWindow'
+import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
+import { BIN_CONFIG, nearestLevelIdx, type BinMode } from '~~/composables/useTimeDepthWindow'
 import { utc2pst } from '~~/composables/useUTC2PST'
 import TimeDepthHeatmap from '../depth/TimeDepthHeatmap.vue'
 import DownloadButton from '../ui/DownloadButton.vue'
@@ -99,7 +99,7 @@ const binModeItems = computed(() => AVAILABLE_MODES.map(m => ({ value: m, label:
 const props = defineProps<{ active?: boolean }>()
 
 const mainStore = useMainStore()
-const { toDisplayValue, displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue } = useVariableRegistry()
 
 const line = computed(() => mainStore.crossSectionLine)
 const source = computed(() => mainStore.selected_variable.source)
@@ -313,47 +313,7 @@ const vertexMarks = computed(() => {
 
 // ── COLOUR RAMP — reads off the map's own colorbar, same as ExplorePanel's
 // Model depth section (see its comment for why: one field, one scale). ───────
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-}
-function lerpRgb(a: number[], b: number[], t: number) { return [a[0]! + (b[0]! - a[0]!) * t, a[1]! + (b[1]! - a[1]!) * t, a[2]! + (b[2]! - a[2]!) * t] }
-function rgbCss(c: number[]) { return `rgb(${c.map(v => Math.round(v)).join(',')})` }
-function colorFromStops(stops: [number, string][], t: number): number[] {
-  const clamped = Math.max(0, Math.min(1, t))
-  const first = stops[0]!
-  if (clamped <= first[0]) return hexToRgb(first[1])
-  for (let i = 0; i < stops.length - 1; i++) {
-    const [p0, c0] = stops[i]!
-    const [p1, c1] = stops[i + 1]!
-    if (clamped <= p1) return lerpRgb(hexToRgb(c0), hexToRgb(c1), p1 === p0 ? 0 : (clamped - p0) / (p1 - p0))
-  }
-  return hexToRgb(stops[stops.length - 1]![1])
-}
-
-const SEQ = [hexToRgb('#0d366b'), hexToRgb('#3987e5'), hexToRgb('#cde2fb')]
-
-const resolvedSeqStops = computed(() =>
-  resolveColormap(mainStore.colormaps, mainStore.selected_variable.colormap)?.stops ?? null)
-
-// Converted to the current display unit — `grid`'s values are (useCrossSectionFetch.ts
-// converts at the source), so these normalization bounds have to match.
-const seqMin = computed(() => toDisplayValue(varId.value, mainStore.selected_variable.colormapMin ?? varMeta.value?.colormapMin ?? 0) ?? 0)
-const seqMax = computed(() => {
-  const hi = toDisplayValue(varId.value, mainStore.selected_variable.colormapMax ?? varMeta.value?.colormapMax ?? 1) ?? 1
-  const lo = seqMin.value
-  return hi > lo ? hi : lo + 1
-})
-
-const seqColorFn = computed(() => {
-  const stops = resolvedSeqStops.value
-  const lo = seqMin.value, hi = seqMax.value
-  return (v: number) => {
-    const t = hi === lo ? 0.5 : Math.max(0, Math.min(1, (v - lo) / (hi - lo)))
-    if (stops && stops.length) return rgbCss(colorFromStops(stops, t))
-    return rgbCss(t < 0.5 ? lerpRgb(SEQ[0]!, SEQ[1]!, t * 2) : lerpRgb(SEQ[1]!, SEQ[2]!, (t - 0.5) * 2))
-  }
-})
+const { colorFn: seqColorFn } = useFieldColorRamp()
 
 // ── TOOLTIP ───────────────────────────────────────────────────────────────────
 const panel = ref<InstanceType<typeof TimeDepthHeatmap> | null>(null)
@@ -376,11 +336,6 @@ watch(() => props.active, (isActive) => {
 // along it. Feed both into the same universal selection ExplorePanel's own
 // onCellClick drives, so the vertical-profile drawer and the map's depth
 // layer react here too, same as they do for a clicked point elsewhere. ─────
-function nearestLevelIdx(depth: number, levels: number[]) {
-  let best = 0, bestDist = Infinity
-  levels.forEach((d, i) => { const dist = Math.abs(d - depth); if (dist < bestDist) { bestDist = dist; best = i } })
-  return best
-}
 
 function onCellClick({ binIdx, depthIdx }: { binIdx: number, depthIdx: number }) {
   const d = depths.value[depthIdx]

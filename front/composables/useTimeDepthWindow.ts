@@ -58,6 +58,13 @@ export function floorToBin(d: Date, mode: BinMode): Date {
 /** Serialise for the API's ISO-8601 window bounds. */
 export function toApiIso(d: Date): string { return d.toISOString().slice(0, 19) + 'Z' }
 
+/** Index of the level in `levels` closest to `depth` (0 for an empty list). */
+export function nearestLevelIdx(depth: number, levels: number[]): number {
+    let best = 0, bestDist = Infinity
+    levels.forEach((d, i) => { const dist = Math.abs(d - depth); if (dist < bestDist) { bestDist = dist; best = i } })
+    return best
+}
+
 /**
  * Bin a raw {time, value} series (e.g. sensor observations, which land at
  * whatever cadence the instrument reports on) down to one mean value per

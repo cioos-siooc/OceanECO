@@ -16,9 +16,9 @@ const mainStore = useMainStore();
 const isOpen = computed(() => mainStore.isControlPanelOpen);
 </script>
 
-<style scoped lang="scss">
-// The panel is the sensor list alone (model controls live in the footer's
-// snapshot); the drawer doesn't scroll, sensorInfo's list does.
+<style scoped>
+/* The panel is the sensor list alone (model controls live in the footer's
+   snapshot); the drawer doesn't scroll, sensorInfo's list does. */
 .control-panel {
     display: flex;
     flex-direction: column;
@@ -28,7 +28,7 @@ const isOpen = computed(() => mainStore.isControlPanelOpen);
 .sensors-block {
     flex: 1 1 auto;
     min-height: 0;
-    // sensorInfo owns its own scrolling so its search/filter row can stay pinned.
+    /* sensorInfo owns its own scrolling so its search/filter row can stay pinned. */
     overflow: hidden;
 }
 </style>

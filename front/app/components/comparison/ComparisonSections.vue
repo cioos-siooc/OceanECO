@@ -66,8 +66,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useMainStore, formatDepthLabel } from '../../stores/main'
 import { fetchDepthProfile, parseCoverageBound, asOutsideDomainError, type DepthProfileResponse, type OutsideDomainError, dataDepthCount } from '~~/composables/useDepthProfileFetch'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
-import { resolveColormap } from '~~/composables/useColormapResolver'
-import { BIN_CONFIG, useTimeDepthWindow, toApiIso, type BinMode } from '~~/composables/useTimeDepthWindow'
+import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
+import { BIN_CONFIG, useTimeDepthWindow, toApiIso, nearestLevelIdx, type BinMode } from '~~/composables/useTimeDepthWindow'
 import TimeDepthHeatmap from '../depth/TimeDepthHeatmap.vue'
 import { csvFilename, csvMeta, csvTimestamp, useCsvExport, type CsvDataset } from '~~/composables/useCsvExport'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -86,7 +86,7 @@ const binModeItems = computed(() => AVAILABLE_MODES.map(m => ({ value: m, label:
 const props = defineProps<{ active?: boolean }>()
 
 const mainStore = useMainStore()
-const { toDisplayValue, displayUnit, formatDisplayValue } = useVariableRegistry()
+const { displayUnit, formatDisplayValue } = useVariableRegistry()
 
 const sensorInfo = computed(() => mainStore.sensors.find(s => s.id === mainStore.selectedSensor?.id) ?? null)
 const modelSource = computed(() => mainStore.selected_variable.source)
@@ -137,11 +137,6 @@ const outOfDomain = ref<OutsideDomainError | null>(null)
 const outOfDomainDismissed = ref(false)
 watch(() => mainStore.selectedSensor?.id, () => { outOfDomainDismissed.value = false })
 
-function nearestLevelIdx(depth: number, levels: number[]) {
-  let best = 0, bestDist = Infinity
-  levels.forEach((d, i) => { const dist = Math.abs(d - depth); if (dist < bestDist) { bestDist = dist; best = i } })
-  return best
-}
 
 function applyResponse(resp: DepthProfileResponse) {
   const timeIndex = new Map<number, number>()
@@ -207,41 +202,7 @@ watch([windowEnd, depths, binMode, () => mainStore.selectedSensor?.id, () => pro
 }, { immediate: true })
 
 // ── COLOUR — the map's scale, so both panels and the map agree. ──────────────
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-}
-function lerpRgb(a: number[], b: number[], t: number) { return [a[0]! + (b[0]! - a[0]!) * t, a[1]! + (b[1]! - a[1]!) * t, a[2]! + (b[2]! - a[2]!) * t] }
-function rgbCss(c: number[]) { return `rgb(${c.map(v => Math.round(v)).join(',')})` }
-function colorFromStops(stops: [number, string][], t: number): number[] {
-  const clamped = Math.max(0, Math.min(1, t))
-  const first = stops[0]!
-  if (clamped <= first[0]) return hexToRgb(first[1])
-  for (let i = 0; i < stops.length - 1; i++) {
-    const [p0, c0] = stops[i]!
-    const [p1, c1] = stops[i + 1]!
-    if (clamped <= p1) return lerpRgb(hexToRgb(c0), hexToRgb(c1), p1 === p0 ? 0 : (clamped - p0) / (p1 - p0))
-  }
-  return hexToRgb(stops[stops.length - 1]![1])
-}
-const FALLBACK = [hexToRgb('#0d366b'), hexToRgb('#3987e5'), hexToRgb('#cde2fb')]
-const stops = computed(() => resolveColormap(mainStore.colormaps, mainStore.selected_variable.colormap)?.stops ?? null)
-// Converted to the current display unit — `modelGrid`/`sensorGrid` values are
-// (useDepthProfileFetch.ts converts at the source), so these normalization
-// bounds have to match.
-const lo = computed(() => toDisplayValue(varId.value, mainStore.selected_variable.colormapMin ?? varMeta.value?.colormapMin ?? 0) ?? 0)
-const hi = computed(() => {
-  const v = toDisplayValue(varId.value, mainStore.selected_variable.colormapMax ?? varMeta.value?.colormapMax ?? 1) ?? 1
-  return v > lo.value ? v : lo.value + 1
-})
-const colorFn = computed(() => {
-  const s = stops.value, min = lo.value, max = hi.value
-  return (v: number) => {
-    const t = Math.max(0, Math.min(1, (v - min) / (max - min)))
-    if (s && s.length) return rgbCss(colorFromStops(s, t))
-    return rgbCss(t < 0.5 ? lerpRgb(FALLBACK[0]!, FALLBACK[1]!, t * 2) : lerpRgb(FALLBACK[1]!, FALLBACK[2]!, (t - 0.5) * 2))
-  }
-})
+const { colorFn } = useFieldColorRamp()
 
 // ── DEPTH / HOVER / STATS ────────────────────────────────────────────────────
 const selectedDepthIdx = field('selectedDepthIdx', 0)

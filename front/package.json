@@ -8,7 +8,8 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "start": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@internationalized/date": "^3.12.3",
@@ -20,7 +21,6 @@
     "mapbox-gl": "3.2.0",
     "moment": "^2.29.4",
     "moment-timezone": "^0.5.40",
-    "nouislider": "^15.8.1",
     "nuxt": "^4.5.2",
     "pinia": "^3.0.4",
     "suncalc": "^1.9.0",
@@ -31,7 +31,6 @@
     "@iconify-json/mdi": "^1.2.3",
     "@nuxt/eslint": "^1.12.1",
     "eslint": "^9.39.2",
-    "sass-embedded": "^1.99.0",
     "typescript": "^5.9.3"
   }
 }
