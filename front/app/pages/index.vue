@@ -1,7 +1,6 @@
 <template>
   <main class="grow min-h-0">
     <BetaDisclaimerDialog />
-    <howTo v-model="showHow" />
     <!-- <div class="flex flex-col h-screen overflow-hidden"> -->
     <!-- Top: Map -->
     <div
@@ -18,7 +17,6 @@
               ? mainStore.controlPanel_width + overlayGap
               : overlayGap) + 'px',
         }"
-        @show-how="showHow = true"
         @autorange="autorange"
       />
 
@@ -367,8 +365,6 @@ watch(() => mainStore.snackMessages.length, (n) => {
         toast.add({ title: m.text, color: (m.color as never) ?? 'info' });
     }
 });
-
-const showHow = ref(false);
 
 // Keeps the style's water-name labels on top of whatever was added since (see raiseWaterNamesLayer).
 const onMapIdle = () => raiseWaterNamesLayer(map);

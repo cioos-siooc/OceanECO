@@ -60,7 +60,7 @@ import { useMainStore } from "../stores/main";
 const mainStore = useMainStore();
 
 const emit = defineEmits<{
-  (e: "show-how" | "autorange"): void;
+  (e: "autorange"): void;
 }>();
 
 ////////////////////////////////////// COMPUTED //////////////////////////////////////
