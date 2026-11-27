@@ -24,17 +24,43 @@ to tags on 2026-11-27; the dates below for those are the last commit on each bra
 ### Removed
 - `deploy.sh` and its branch-based deploy flow.
 
-## [Unreleased] — v0.4.1
+## [1.2.4] — 2026-11-27
+
+### Fixed
+- **Explore timeseries** plots model, sensor and climatology together again.
+- **SQL injection** closed in the sensor and climatology reads.
+- `/getProfile` drops NaN values instead of failing to serialise the response.
+- Sensors image: only the uv cache is made writable, not all of `/app`.
+
+## [1.2.3] — 2026-11-25
+
+### Changed
+- Season buttons show the full month names on hover.
+
+### Fixed
+- Explore: switching to hourly jumps to the latest data, with a notice above the map info box;
+  the range label shows the year in every bin mode.
+
+## [1.2.2] — 2026-11-24
+
+### Fixed
+- Explore timeseries x-axis ticks fall on the app timezone, with labels suited to the bin mode.
+
+## [1.2.1] — 2026-11-24
 
 ### Added
-- **Share links** — the entire view (tab, coordinate, variable, depth, instant, drawn
-  cross-section line, per-tab control state) encodes into a `#s=` URL fragment via
-  `composables/useShareState.ts`, compressed with the platform's own `CompressionStream`.
-- **`useViewState` / `useChartZoom`** — namespaced per-view state bag in the Pinia store so
-  per-tab controls and chart zoom extents become shareable without schema changes.
-- **DFO MEDS buoy catalog** (`sensors/catalog_dfo_meds.yml`) and extra ERDDAP fetch
-  constraints for more reliable sensor ingestion.
-- Disabled states and explanatory tooltips across controls that require a prior selection.
+- Adjustable percentile threshold in Analysis → Extreme Events.
+- Feedback Survey link on the About page.
+
+### Fixed
+- Switching bin mode in Explore keeps the selected instant in view.
+- Colour bar "Reset to Defaults" also restores the default palette.
+
+## [1.2.0] — 2026-11-24
+
+### Added
+- **In-app User Guide** (`/guide`) with tutorial videos served by the API.
+- **API/database status** in the header: `GET /health`, an indicator and an outage/recovery banner.
 - **Nitrate, diatoms and flagellates** — downloaded, stored and served alongside the other
   eight SalishSeaCast variables (ERDDAP biology dataset), back to 2007.
 - **Daily surface tiles** — the pipeline renders each date's 0.5 m daily-mean tile per
@@ -42,13 +68,16 @@ to tags on 2026-11-27; the dates below for those are the last commit on each bra
 - **Hourly retention** — the API keeps 92 days of hourly rows and tiles
   (`SSC_HOURLY_RETENTION_DAYS`), pruning after each successful hourly sync; `/variables`
   offers only those hours. Daily data is kept.
+- Ingest backfill (`--variables`, `--daily-only`) with a fallback to the yearly NC archive;
+  `image --surface-only`.
+- Dissolved oxygen and salinity sources for ONC profilers.
+- Cloudflare tunnel as the API's public ingress, and a Vercel maintenance-mode middleware.
 
 ### Changed
 - **Integer model storage** — `SalishSeaCast_hourly`/`_daily` store each variable as
   `{var}_q` Int32 = round(value / precision) with decoding ALIAS columns, so readers are
   unchanged. Daily keeps means only, partitioned by year; 2007–2026 rebuilt from the NC
-  archive in ~200 GB. One DDL for process and
-  API in `shared/ssc_schema.py`.
+  archive in ~200 GB. One DDL for process and API in `shared/ssc_schema.py`.
 - **Ingest rewritten** — block reads and Native inserts (~90 s, ~5 GB a day); rerunning a
   date replaces its rows instead of duplicating them. Sync exports stream to disk.
 - **Compressed downloads** — ERDDAP NetCDF is stored as netCDF-4 deflate 4 (lossless,
@@ -59,6 +88,85 @@ to tags on 2026-11-27; the dates below for those are the last commit on each bra
   series, and Comparison drops the model min/max lines and CSV columns;
   `/analysis/timeseries` returns 400 for any other model statistic. Analysis variable
   pickers and labels come from `variable_config.yml`, so the three new variables appear.
+- ClickHouse host port moved from 9000 to 9013.
+
+### Fixed
+- Model tiles: NC `(gridY, gridX)` slices aligned with the `(gridX, gridY)` grid.
+- Explore's time-depth window includes the latest data bin.
+- Sync no longer reports success when no local rows were ingested.
+- Map layers stay consistent when a tile image fails to load.
+- ONC profiler backfill fetches one day per request with a longer timeout; ERDDAP 404
+  "no matching results" is treated as empty.
+
+## [1.0.1] — 2026-10-27
+
+### Added
+- `ROADMAP.md` for tracking feature ideas.
+
+### Fixed
+- Explore plots sensor data past the model's last timestamp.
+
+## [1.0.0] — 2026-10-20
+
+### Added
+- **Compare instruments** — every ONC instrument is stored as its own series
+  (`sensor_timeseries.source`); readers merge them by priority, and a toggle on the selected
+  sensor's card overlays each instrument in Explore with a difference panel.
+- **Cursor Value** overlay — reads the model value under the mouse from the map tile.
+- Yarrow Point profiler (variable-depth sensors in `onc_to_ch.py`).
+- Bin mode on `TimeseriesChart` for time formatting.
+
+### Changed
+- **Usage analytics moved to Umami** — the frontend now reports to the shared CIOOS
+  Pacific Umami server (`NUXT_PUBLIC_UMAMI_WEBSITE_ID`); same custom events as before.
+- Sensors are defined only in `sensors/catalog_*.yml` (`catalog.yaml` retired).
+- DFO MEDS sensors marked inactive.
+- Chart polish in Timeseries, Climatology, Correlation, Trend and Comparison.
+
+### Fixed
+- ONC fetches no longer drop the oldest history past 100k rows.
+- Depth of the Profiling Instrument Package; Fraser River Delta sensor ID on the About page.
+
+### Removed
+- **PostHog** on both frontend (`posthog-js`, `X-PostHog-Distinct-Id` header) and API
+  (`posthog_helpers.py`, per-endpoint `capture_event`); the API no longer sends analytics.
+
+## [0.4.4] — 2026-09-29
+
+### Changed
+- Sensor information layout and loading indicators; restyled About and case study pages.
+
+### Fixed
+- Prefect API URL points at the new pipeline endpoint.
+
+## [0.4.3] — 2026-09-25
+
+### Added
+- **Prefect scheduling** — flow `oceaneco-ssc-pipeline` runs the SSC pipeline on a cron
+  with overlapping runs cancelled, reporting to the shared CIOOS Pacific Prefect server;
+  sensor ingestion flows for ERDDAP and ONC.
+
+## [0.4.2] — 2026-09-16
+
+### Added
+- Model and sensor layer toggles in the map overlays.
+
+### Fixed
+- Depth of the Bamfield Marine Sciences Centre CO2 sensor (20 m, was −1).
+
+## [0.4.1] — 2026-09-08
+
+### Added
+- **Share links** — the entire view (tab, coordinate, variable, depth, instant, drawn
+  cross-section line, per-tab control state) encodes into a `#s=` URL fragment via
+  `composables/useShareState.ts`, compressed with the platform's own `CompressionStream`.
+- **`useViewState` / `useChartZoom`** — namespaced per-view state bag in the Pinia store so
+  per-tab controls and chart zoom extents become shareable without schema changes.
+- **DFO MEDS buoy catalog** (`sensors/catalog_dfo_meds.yml`) and extra ERDDAP fetch
+  constraints for more reliable sensor ingestion.
+- Disabled states and explanatory tooltips across controls that require a prior selection.
+
+### Changed
 - **Variable-aware value rounding** — `formatDisplayValue()` is now the single rounding
   answer for every tooltip, axis label and readout, derived from `variable_config.yml`
   precision in the currently displayed unit.
@@ -66,12 +174,6 @@ to tags on 2026-11-27; the dates below for those are the last commit on each bra
   two-column CSV, with `latitude`/`longitude` on their own rows and units moved to a
   second header row instead of being baked into column names.
 - Legend swatches pinned to one style app-wide via the shared ECharts dark theme.
-- **Usage analytics moved to Umami** — the frontend now reports to the shared CIOOS
-  Pacific Umami server (`NUXT_PUBLIC_UMAMI_WEBSITE_ID`); same custom events as before.
-
-### Removed
-- **PostHog** on both frontend (`posthog-js`, `X-PostHog-Distinct-Id` header) and API
-  (`posthog_helpers.py`, per-endpoint `capture_event`); the API no longer sends analytics.
 
 ## [0.4.1-nuxtui] — 2026-08-28
 
