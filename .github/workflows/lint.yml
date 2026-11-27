@@ -1,0 +1,30 @@
+name: Lint frontend
+
+on:
+  push:
+    paths: ['front/**', '.github/workflows/lint.yml']
+  pull_request:
+    paths: ['front/**', '.github/workflows/lint.yml']
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: front/package-lock.json
+
+      # postinstall runs `nuxt prepare`, which generates the .nuxt/eslint.config.mjs that eslint.config.mjs extends.
+      - name: Install dependencies
+        working-directory: front
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint
+        working-directory: front
+        run: npm run lint
