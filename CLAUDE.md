@@ -162,12 +162,14 @@ Umami on the shared CIOOS Pacific server (https://analytics.cioospacific.ca) is 
 `process/`, `scripts/` use **uv** (`pyproject.toml` + `uv.lock`); `api/` uses pip + `requirements.txt`. Each has its own `.venv`.
 
 ## Version Logging
-When asked to log a new version or update changes:
-- Update `CHANGELOG.md` (Keep a Changelog: Added, Changed, Fixed).
-- Bump the version in `front/package.json` per SemVer.
-- Summarize key user-facing updates in ≤3 bullets.
-
-Releases are **tags, not branches** (old `v*` release branches were converted to tags on 2026-11-27). When asked to release/tag a version: commit the CHANGELOG + `front/package.json` bump on `main` (`chore(release): vX.Y.Z`), `git tag -a vX.Y.Z -m "vX.Y.Z"`, then `git push origin main vX.Y.Z`. Never create a `vX.Y.Z` branch; a `release/X.Y` branch from a tag only when an old release needs a patch after `main` moved on.
+Releases are **git tags, not branches** (old `v*` release branches became tags on 2026-11-27). `front/package.json`'s `version` is the only version source: `nuxt.config.ts` puts it in `appConfig` for the header badge (no env var).
+- **Every commit with a notable change** (feature, fix, removal, infra): add a bullet under `## [Unreleased]` at the top of `CHANGELOG.md` (Keep a Changelog: Added, Changed, Fixed, Removed) in the same commit. Docs-only commits need none.
+- **When asked to release / tag vX.Y.Z** (SemVer; suggest the bump from `[Unreleased]`'s contents if not given):
+  1. Rename `## [Unreleased]` to `## [X.Y.Z] — YYYY-MM-DD`, adding entries for any commits since the last tag (`git log vPREV..main`) that it misses.
+  2. Set `version` in `front/package.json` and both root `version` fields in `front/package-lock.json` by hand (`npm install` rewrites unrelated lines).
+  3. Commit on `main` as `chore(release): vX.Y.Z`, `git tag -a vX.Y.Z -m "vX.Y.Z"`, `git push origin main vX.Y.Z`.
+  4. Summarize the key user-facing updates in ≤3 bullets.
+- Never create a `vX.Y.Z` branch, and never move a pushed tag; a commit after a tag goes into the next release. A `release/X.Y` branch from a tag only when an old release needs a patch after `main` moved on.
 
 ## Roadmap
 Feature ideas and planned work live in `ROADMAP.md` (Next / Later / Parked). When a roadmap item ships, remove it there and log it in `CHANGELOG.md`.
