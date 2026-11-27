@@ -48,6 +48,19 @@ def test_extract_profile_happy_path(monkeypatch):
     assert fake.closed
 
 
+def test_extract_profile_drops_null_and_nan(monkeypatch):
+    fake = FakeClient(
+        grid_row=(10, 20, 49.0, -123.0, 500.0),
+        time_row=(datetime(2026, 1, 1, 12), 0),
+        profile_rows=[(0.0, 8.0), (5.0, float("nan")), (10.0, None)],
+    )
+    monkeypatch.setattr('extract_profile.get_ch_client', lambda: fake)
+
+    profile = extract_profile(source='SalishSeaCast', var='ph_total', lat=49.0, lon=-123.0, dt='2026-01-01T12:00:00')
+
+    assert profile == [{"depth": 0.0, "value": 8.0}]
+
+
 def test_extract_profile_out_of_domain_raises(monkeypatch):
     fake = FakeClient(grid_row=(10, 20, 60.0, -130.0, 50_000.0))
     monkeypatch.setattr('extract_profile.get_ch_client', lambda: fake)
