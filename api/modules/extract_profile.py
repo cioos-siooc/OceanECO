@@ -13,6 +13,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import math
 from typing import List, Optional
 
 import pandas as pd
@@ -141,10 +142,9 @@ def extract_profile(
             """
             rows = client.query(query, parameters={"gx": grid_x, "gy": grid_y, "month": month_start}).result_rows
 
-        # ingest.py already filters NaN/0/land rows out of the hourly table; the
-        # daily/monthly aggregates can still average down to NULL if every
-        # contributing row was NULL, so filter those here too.
-        return [{"depth": float(d), "value": float(v)} for d, v in rows if v is not None]
+        # Daily/monthly aggregates can average down to NULL, and NaN can still reach
+        # the hourly table; either would break the JSON response, so drop both.
+        return [{"depth": float(d), "value": float(v)} for d, v in rows if v is not None and math.isfinite(v)]
     finally:
         client.close()
 
