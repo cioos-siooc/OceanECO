@@ -30,7 +30,6 @@ docker compose -f docker-compose.dev.yml --env-file .env.dev up
 cd front && npm run dev | npm run build | npm run lint
 cd api && pytest tests/                      # or a single file, e.g. tests/test_extract_timeseries_all.py
 docker compose -f docker-compose.dev.yml exec db-ch clickhouse-client --query "SHOW TABLES"
-./deploy.sh dev | prod                       # frontend → dev / master branch
 ```
 
 **Process CLI** — dev: the `process` container or uv; prod: `docker compose -f docker-compose.prod.process.yml --env-file .env.process.remote exec scheduler uv run python -m SSC.cli …` (or `run --rm scheduler …` while it's stopped):
@@ -165,8 +164,10 @@ Umami on the shared CIOOS Pacific server (https://analytics.cioospacific.ca) is 
 ## Version Logging
 When asked to log a new version or update changes:
 - Update `CHANGELOG.md` (Keep a Changelog: Added, Changed, Fixed).
-- Bump the version in `package.json` per SemVer.
+- Bump the version in `front/package.json` per SemVer.
 - Summarize key user-facing updates in ≤3 bullets.
+
+Releases are **tags, not branches** (old `v*` release branches were converted to tags on 2026-11-27). When asked to release/tag a version: commit the CHANGELOG + `front/package.json` bump on `main` (`chore(release): vX.Y.Z`), `git tag -a vX.Y.Z -m "vX.Y.Z"`, then `git push origin main vX.Y.Z`. Never create a `vX.Y.Z` branch; a `release/X.Y` branch from a tag only when an old release needs a patch after `main` moved on.
 
 ## Roadmap
 Feature ideas and planned work live in `ROADMAP.md` (Next / Later / Parked). When a roadmap item ships, remove it there and log it in `CHANGELOG.md`.
