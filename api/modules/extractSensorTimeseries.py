@@ -33,11 +33,18 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from modules.clickhouse_helpers import get_ch_client
 from modules.extractTimeseries import DATA_TABLE_BY_SOURCE, _get_depth_levels, _nearest_level_index
+
+
+def _safe_id(sensor_id) -> str:
+    """`sensor_id` reduced to UUID characters, so it is safe to quote into SQL
+    (stripping quotes alone leaves a backslash that escapes the closing one)."""
+    return re.sub(r"[^0-9A-Za-z-]", "", str(sensor_id))
 
 
 def _fmt(dt_str: str) -> str:
@@ -49,7 +56,7 @@ def _fmt(dt_str: str) -> str:
 
 
 def _is_profiler_sensor(client, sensor_id: str) -> bool:
-    safe_id = str(sensor_id).replace("'", "")
+    safe_id = _safe_id(sensor_id)
     rows = client.query(
         f"SELECT depth FROM sensors FINAL WHERE id = '{safe_id}' LIMIT 1"
     ).result_rows
@@ -60,7 +67,7 @@ def source_rank_sql(client, sensor_id: str, variable: str) -> str:
     """SQL ranking a row's `source` by the sensor's priority order for
     `variable`: 1 for the first instrument, and past the end for one no longer
     listed. Constant for single-source sensors (ERDDAP, most ONC)."""
-    safe_id = str(sensor_id).replace("'", "")
+    safe_id = _safe_id(sensor_id)
     rows = client.query(
         f"SELECT device_config FROM sensors FINAL WHERE id = '{safe_id}' LIMIT 1"
     ).result_rows
@@ -77,11 +84,11 @@ def series_query(client, sensor_id: str, variable: str, instrument: Optional[str
                  where: str, keys: str, columns: str) -> str:
     """A sensor_timeseries read of `columns` (from `keys` plus `value`) under
     `where`: one row per `keys`, the highest-priority instrument's value — or
-    only `instrument`'s rows when one is named."""
+    only `instrument`'s rows when one is named, bound as `{inst:String}`, so
+    the caller passes `parameters={"inst": instrument, ...}`."""
     if instrument is not None:
-        safe_instrument = instrument.replace("'", "''")
         return (f"SELECT {columns} FROM sensor_timeseries FINAL "
-                f"WHERE {where} AND source = '{safe_instrument}' ORDER BY {keys}")
+                f"WHERE {where} AND source = {{inst:String}} ORDER BY {keys}")
     rank = source_rank_sql(client, sensor_id, variable)
     return (f"SELECT {columns} FROM ("
             f"  SELECT {keys}, argMin(value, {rank}) AS value FROM sensor_timeseries FINAL "
@@ -139,10 +146,9 @@ def extract_sensor_timeseries(
     from_str = _fmt(from_date)
     to_str   = _fmt(to_date)
 
-    # Escape variable name for use in query string (it comes from the API
-    # request but is already validated by the caller against the sensors table).
-    safe_var = variable.replace("'", "''")
-    safe_id  = str(sensor_id).replace("'", "")
+    # Request strings are bound server-side, never pasted into the SQL.
+    params = {"v": variable, **({"inst": instrument} if instrument is not None else {})}
+    safe_id  = _safe_id(sensor_id)
 
     if depth is not None and _is_profiler_sensor(client, sensor_id):
         if source not in DATA_TABLE_BY_SOURCE:
@@ -156,11 +162,11 @@ def extract_sensor_timeseries(
 
         result = client.query(series_query(
             client, safe_id, variable, instrument,
-            f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+            f"sensor_id = '{safe_id}' AND variable = {{v:String}} "
             f"AND depth >= {lo} AND depth < {hi} "
             f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
             keys="time, depth", columns="time, value",
-        ))
+        ), parameters=params)
         rows = result.result_rows
         if not rows:
             return {"time": [], "value": [], "depth": target_level}
@@ -172,11 +178,12 @@ def extract_sensor_timeseries(
     if depth is not None:
         # Find the single stored depth closest to the requested value, then
         # fetch only rows at that depth.  Two queries, both tiny.
-        instrument_where = f" AND source = '{instrument.replace(chr(39), chr(39) * 2)}'" if instrument else ""
+        instrument_where = " AND source = {inst:String}" if instrument else ""
         nearest_rows = client.query(
             f"SELECT depth FROM sensor_timeseries "
-            f"WHERE sensor_id = '{safe_id}' AND variable = '{safe_var}'{instrument_where} "
-            f"ORDER BY abs(depth - {float(depth)}) LIMIT 1"
+            f"WHERE sensor_id = '{safe_id}' AND variable = {{v:String}}{instrument_where} "
+            f"ORDER BY abs(depth - {float(depth)}) LIMIT 1",
+            parameters=params,
         ).result_rows
         if not nearest_rows:
             raise FileNotFoundError(
@@ -186,11 +193,11 @@ def extract_sensor_timeseries(
 
         result = client.query(series_query(
             client, safe_id, variable, instrument,
-            f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+            f"sensor_id = '{safe_id}' AND variable = {{v:String}} "
             f"AND depth = {target_depth} "
             f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
             keys="time", columns="time, value",
-        ))
+        ), parameters=params)
         rows = result.result_rows
         if not rows:
             return {"time": [], "value": [], "depth": target_depth}
@@ -202,10 +209,10 @@ def extract_sensor_timeseries(
     # No depth filter — return all depth levels.
     result = client.query(series_query(
         client, safe_id, variable, instrument,
-        f"sensor_id = '{safe_id}' AND variable = '{safe_var}' "
+        f"sensor_id = '{safe_id}' AND variable = {{v:String}} "
         f"AND time >= toDateTime('{from_str}') AND time <= toDateTime('{to_str}')",
         keys="time, depth", columns="time, depth, value",
-    ))
+    ), parameters=params)
     rows = result.result_rows
     if not rows:
         raise FileNotFoundError(

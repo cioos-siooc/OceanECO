@@ -46,7 +46,11 @@ def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bi
     view's own coarse bins instead of overlaying a much finer day-of-year
     cycle stretched across the 20-year window.
     """
-    from modules.extractTimeseries import _find_nearest_grid_point
+    from modules.extractTimeseries import ALLOWED_VARIABLES, _find_nearest_grid_point
+
+    # `variable` becomes a column name in the SQL below, so only known ones pass.
+    if variable not in ALLOWED_VARIABLES:
+        raise ValueError(f"Unknown variable '{variable}'. Supported variables: {sorted(ALLOWED_VARIABLES)}")
 
     client = _get_ch_client()
 

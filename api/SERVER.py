@@ -693,6 +693,8 @@ async def fn_extract_ClimateTimeseries(request: climate_timeseriesRequest):
         raise
     except OutsideDomainError as exc:
         return _outside_domain_response(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.exception("extract_climate_timeseries failed")
         raise HTTPException(status_code=500, detail=str(exc))
