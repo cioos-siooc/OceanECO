@@ -43,3 +43,35 @@ export function resolveColormapName(colormaps: ColormapMap, base: string, invert
     if (!colormaps[storedName]) return null;
     return reversed ? `${storedName}_r` : storedName;
 }
+
+/**
+ * Mapbox `raster-color` / `raster-color-range` for a value-packed raster
+ * (value = base + packed * precision): the colormap's stops placed at their
+ * packed values over [min, max], or a default ramp without a colormap.
+ */
+export function packedRasterPaint(cmap: ColormapEntry | null, min: number, max: number, precision: number, base: number) {
+    const raster_values: any[] = [];
+    if (cmap && Array.isArray(cmap.stops) && cmap.stops.length > 0) {
+        for (const [pos, color] of cmap.stops) {
+            // pos may be normalized [0..1] or absolute depending on cmap.mode
+            const val_phys = !cmap.mode || cmap.mode === 'normalized' ? min + pos * (max - min) : pos;
+            raster_values.push((val_phys - base) / precision, color);
+        }
+    } else {
+        const color_stops: [number, string][] = [
+            [0.0, 'rgba(0, 0, 0, 1)'],
+            [0.001, '#440154'],
+            [0.25, '#00f'],
+            [0.5, '#0f0'],
+            [0.75, '#fde725'],
+            [1.0, '#f00'],
+        ];
+        for (const [pos, color] of color_stops) {
+            raster_values.push((min + pos * (max - min) - base) / precision, color);
+        }
+    }
+    return {
+        color: ['interpolate', ['linear'], ['raster-value'], ...raster_values] as any,
+        range: [(min - base) / precision, (max - base) / precision] as [number, number],
+    };
+}
