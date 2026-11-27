@@ -8,7 +8,7 @@
 
       <div class="flex items-center min-w-0">
         <span class="">OceanECO</span>
-        <span class="text-xs font-medium mx-2" style="font-family: monospace">v{{ versionLabel }}</span>
+        <span class="text-xs font-medium mx-2" style="font-family: monospace">v{{ useAppConfig().version }}</span>
       </div>
 
       <ApiStatusIndicator />
@@ -61,11 +61,6 @@ import ApiStatusBanner from './components/status/ApiStatusBanner.vue'
 import { useApiStatus } from '~~/composables/useApiStatus'
 const mainStore = useMainStore();
 const config = useRuntimeConfig();
-// NUXT_PUBLIC_* env values are JSON-parsed at runtime, so "1.0" arrives as the number 1.
-const versionLabel = computed(() => {
-  const v = String(config.public.version ?? '');
-  return /^\d+$/.test(v) ? `${v}.0` : v;
-});
 const apiBaseUrl = config.public.apiBaseUrl;
 const apiStatus = useApiStatus();
 

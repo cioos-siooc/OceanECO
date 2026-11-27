@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Releases are git tags (`vX.Y.Z`). Before v1.2.5 they were long-lived branches, converted
 to tags on 2026-11-27; the dates below for those are the last commit on each branch.
 
+## [Unreleased]
+
+### Changed
+- The header's version badge is read from `front/package.json` at build time
+  (`NUXT_PUBLIC_VERSION` removed).
+
+### Removed
+- Cloudflare Pages deploy workflow (`.github/workflows/deploy.yml`); the frontend deploys on Vercel.
+
 ## [1.2.5] — 2026-11-27
 
 ### Added

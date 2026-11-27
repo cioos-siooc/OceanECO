@@ -1,5 +1,7 @@
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import pkg from './package.json'
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
@@ -39,11 +41,12 @@ export default defineNuxtConfig({
     preference: 'dark',
     fallback: 'dark',
   },
+  // appConfig, not runtimeConfig: no env var can override it, so the badge always matches package.json
+  appConfig: { version: pkg.version },
   runtimeConfig: {
     public: {
       mapboxToken: process.env.NUXT_PUBLIC_MAPBOX_TOKEN || '',
       apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || '',
-      version: process.env.NUXT_PUBLIC_VERSION || '',
       umamiWebsiteId: process.env.NUXT_PUBLIC_UMAMI_WEBSITE_ID || '',
       umamiHost: process.env.NUXT_PUBLIC_UMAMI_HOST || 'https://analytics.cioospacific.ca',
       // Where the user guide's clips (NN.mp4) are served from; empty = the API's /videos/.
