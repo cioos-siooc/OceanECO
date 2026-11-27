@@ -350,6 +350,8 @@ const cursorValueText = computed(() => {
 // Flags to coordinate initial click: mapLoaded becomes true when map 'load' fires;
 // selectedReady becomes true when initial variables/selectedVariable are set.
 const mapLoaded = ref(false);
+// The style's 'load' has fired, so layers can be added. Distinct from mapLoaded, which waits for the first raster.
+let styleLoaded = false;
 const selectedReady = ref(false);
 let didInitClick = false;
 
@@ -406,6 +408,7 @@ onMounted(async () => {
 
     // When the map finishes loading the style, add the PNG overlay and chart
     map.on('load', () => {
+        styleLoaded = true;
         applyBasemapPaint(map);
         addSatelliteLayer(map);
         // Every other layer added below/elsewhere on this page (PNG overlay,
@@ -502,7 +505,8 @@ onBeforeUnmount(() => {
 // overlay collapses that to a single call no matter how many of them changed
 // at once.
 watch(() => [mainStore.selected_variable.source, mainStore.selected_variable.var, mainStore.selected_variable.depth, mainStore.selected_variable.dt, mainStore.midDate], async ([, v]: [string, string, string | null, moment.Moment | null, moment.Moment | null]) => {
-    if (!map) return;
+    // Before the style loads nothing can be added; init() on 'load' sets midDate, which re-runs this.
+    if (!map || !styleLoaded) return;
 
     if (!v) {
         removePngOverlay();
