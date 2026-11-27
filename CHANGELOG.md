@@ -4,8 +4,25 @@ All notable changes to OceanECO are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Releases have historically been tracked as long-lived `vX.Y` branches rather than
-git tags; the dates below are the last commit on each version branch.
+Releases are git tags (`vX.Y.Z`). Before v1.2.5 they were long-lived branches, converted
+to tags on 2026-11-27; the dates below for those are the last commit on each branch.
+
+## [1.2.5] — 2026-11-27
+
+### Added
+- **Nightly backup** of the API machine's ClickHouse tables and SSC tiles (`scripts/backup.sh`:
+  FREEZE + rsync, so the database stays online), run as the `OceanECO-backup` Prefect flow by
+  the new `backup-scheduler` service.
+- Sample env files without secrets (`.env.dev.example`, `.env.prod.api.example`,
+  `.env.process.remote.example`).
+
+### Fixed
+- SSC sync no longer fails on long imports: `/admin/syncHourly` and `/admin/syncDaily` are
+  triggered over SSH on the API host instead of through Cloudflare, whose proxy timed out (524)
+  after ~100 s.
+
+### Removed
+- `deploy.sh` and its branch-based deploy flow.
 
 ## [Unreleased] — v0.4.1
 
