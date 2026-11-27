@@ -11,9 +11,10 @@
         :key="sensor.id"
         class="sensor-picker__item"
         @click="pick(sensor)"
+        @keydown.enter="pick(sensor)"
       >
-        <div role="button" tabindex="0"-title class="">{{ sensor.name }}</div>
-        <div role="button" tabindex="0"-subtitle class="">{{ depthTxt(sensor) }}</div>
+        <div class="text-sm">{{ sensor.name }}</div>
+        <div class="text-xs text-muted">{{ depthTxt(sensor) }}</div>
       </div>
     </div>
   </div>
@@ -85,6 +86,7 @@ function pick(sensor: MultiSensorCandidate) {
   cursor: pointer;
   border-radius: 4px;
   margin: 0 4px 2px;
+  padding: 6px 8px;
 }
 
 .sensor-picker__item:hover {

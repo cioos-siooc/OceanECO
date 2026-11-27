@@ -239,7 +239,7 @@ type Sensor = typeof mainStore.sensors[number];
 
 ///////////////////////////////////  PROPS & STATE  ///////////////////////////////////
 
-const sensors = computed(() => mainStore.sensors.sort((a, b) => a.active === b.active ? 0 : a.active ? -1 : 1)); // active sensors first
+const sensors = computed(() => [...mainStore.sensors].sort((a, b) => a.active === b.active ? 0 : a.active ? -1 : 1)); // active sensors first
 const selectedSensor = computed(() => mainStore.selectedSensor);
 // Filter state lives in the store so the map layer can apply the same filters to its markers.
 const {
