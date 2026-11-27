@@ -15,6 +15,7 @@ Host ports come from `docker-compose.dev.yml`'s `${VAR:-default}` fallbacks, ove
 | `scheduler` | Prod only (`docker-compose.prod.process.yml`): `process` image serving `SSC/flows.py` to Prefect; the only pipeline container there | — |
 | `tunnel` | Prod only (`docker-compose.prod.api.yml`): cloudflared, the API's only public ingress (`CLOUDFLARE_TUNNEL_TOKEN`; dashboard hostname → `http://api:4000`); `api`'s host port is loopback-only | — |
 | `sensors-scheduler` | Prod only (`docker-compose.prod.api.yml`): `sensors` image serving `sensors/flows.py` (hourly ERDDAP/ONC ingestion) | — |
+| `backup-scheduler` | Prod only (`docker-compose.prod.api.yml`): serves `backup/flows.py` (deployment `OceanECO-backup`, `BACKUP_CRON` default `0 3 * * *`), running `scripts/backup.sh`: FREEZE + rsync of every `default` MergeTree table, plus the SSC tiles, to `BACKUP_DEST` (`BACKUP_SSH`, key in the mounted `BACKUP_SSH_DIR`). Runs as root, host dirs mounted read-only at their host paths. `DRY=1` / flow param `dry_run` = rsync dry run | — |
 
 Prefect is **prod-only**: both schedulers report to the shared https://pipelines.cioospacific.ca (the [cioos-pacific-pipeline](https://github.com/cioos-siooc/cioos-pacific-pipeline) stack; our flows are served by our own containers, not its `pipelines` work pool). Dev has no Prefect server or schedulers — run the CLI instead.
 
@@ -100,7 +101,7 @@ pending_download → downloading → success_download → pending_compute → co
 
 **Prefect.** `SSC/flows.py` is the only module importing Prefect (the CLI works without a server). Flow `oceaneco-ssc-pipeline`, deployment `OceanECO-SSC`, tag `oceaneco` (the server is shared across apps), one task run per step. Served by `scheduler` on cron `RUN_CRON` (default `0 */3 * * *`) with `RUN_LIMIT`/`RUN_WORKERS` (10/30); overlapping runs are cancelled (`CANCEL_NEW`). `SalishSeaCast.*`/`nc2tile` loggers reach task logs via `PREFECT_LOGGING_EXTRA_LOGGERS`. Sweep stages mark rows `failed_*` without raising; each run ends with an `oceaneco-ssc-status` markdown artifact and is marked Failed if any row failed. Ad-hoc runs (`date`, `force`) via the UI's "Run → custom".
 - `RUN_SCHEDULE_PAUSED` (default `false`) is re-applied on every scheduler start, so a UI pause lasts until the next restart. Stop `scheduler` for a pause that holds.
-- `prefect==` in `process/pyproject.toml` and `sensors/pyproject.toml` must be ≤ the shared server's version.
+- `prefect==` in `process/pyproject.toml` and `sensors/pyproject.toml` must be ≤ the shared server's version (`backup/Dockerfile` installs Prefect at `sensors/uv.lock`'s versions).
 - Prod (`docker-compose.prod.process.yml`) has no `process` service and no local server; `scheduler` (`tools` profile) reports to `PREFECT_API_URL` (`https://pipelines.cioospacific.ca/api`, basic auth `PREFECT_AUTH_STRING`). A code update means rebuilding/recreating `scheduler`.
 - Don't start a manual `SSC.cli run` while a scheduled one is in progress — both claim the same pending rows.
 - Renaming a flow/deployment leaves the old one on the server — delete it in the UI.

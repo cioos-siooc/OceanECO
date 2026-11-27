@@ -119,6 +119,42 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Nightly backup of db-ch and the SSC tiles to the backup host: serves
+  # backup/flows.py (deployment OceanECO-backup, BACKUP_CRON, default 03:00),
+  # which runs scripts/backup.sh — FREEZE + rsync, so db-ch stays up and only
+  # new parts are sent. Runs as root (frozen parts belong to ClickHouse's UID);
+  # host dirs are mounted read-only at their host paths, so the script's paths
+  # are the same in here as on the host. BACKUP_SSH_DIR is the host user's
+  # ~/.ssh holding BACKUP_SSH's key and a known_hosts entry for the backup host.
+  # Stopping it pauses the schedule; starting it re-applies BACKUP_SCHEDULE_PAUSED.
+  backup-scheduler:
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    environment:
+      - CH_HOST=db-ch
+      - CH_PORT=8123
+      - CH_USER=${CH_USER:-default}
+      - CH_PASSWORD=${CH_PASSWORD:-}
+      - CH_DATA_DIR=${CH_DATA_DIR:-/home/cioos/clickhouse_data}
+      - DATA_DIR=${DATA_DIR:-/home/cioos/OA_data}
+      - SSC_IMAGE_DIR=${SSC_IMAGE_DIR:-/opt/data/SSC/images}
+      - BACKUP_DEST=${BACKUP_DEST:-}
+      # BatchMode: fail instead of prompting; known_hosts from the mounted dir (root's has none).
+      - BACKUP_SSH=${BACKUP_SSH:-ssh} -o BatchMode=yes -o UserKnownHostsFile=${BACKUP_SSH_DIR}/known_hosts
+      - PREFECT_API_URL=${PREFECT_API_URL:?set PREFECT_API_URL (e.g. https://pipelines.cioospacific.ca/api) — did you pass --env-file?}
+      - PREFECT_API_AUTH_STRING=${PREFECT_API_AUTH_STRING:-}
+      - BACKUP_CRON=${BACKUP_CRON:-0 3 * * *}
+      - BACKUP_SCHEDULE_PAUSED=${BACKUP_SCHEDULE_PAUSED:-false}
+    volumes:
+      - ${CH_DATA_DIR:-/home/cioos/clickhouse_data}:${CH_DATA_DIR:-/home/cioos/clickhouse_data}:ro
+      - ${DATA_DIR:-/home/cioos/OA_data}:${DATA_DIR:-/home/cioos/OA_data}:ro
+      - ${BACKUP_SSH_DIR:?set BACKUP_SSH_DIR to the host user's .ssh dir holding the backup key}:${BACKUP_SSH_DIR}:ro
+    depends_on:
+      db-ch:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Canonical ClickHouse — receives the PROCESS machine's synced
   # SalishSeaCast_hourly data (see api/modules/sync_hourly.py) and serves
   # extractTimeseries/analysis queries. Not the same as the PROCESS
