@@ -138,10 +138,18 @@ function columnAt(p: number): { s: GliderSectionResponse, i: number } | null {
   return { s, i }
 }
 
+// Deployments and floats span years, so every date carries one.
 const fmtDate = (iso: string, withTime = false) => new Date(iso).toLocaleString('en-US', {
-  month: 'short', day: 'numeric', timeZone: 'UTC',
+  month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   ...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
 })
+/** Axis label: the date (and time) over its year, to stay narrow. */
+const axisDate = (iso: string, withTime: boolean) => {
+  const d = new Date(iso)
+  const md = d.toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  const hm = withTime ? ` ${d.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })}` : ''
+  return `${md}${hm}\n${d.getUTCFullYear()}`
+}
 
 /** Times at the ends of the zoom window (the whole deployment when not zoomed). */
 const windowTimes = computed(() => {
@@ -167,7 +175,7 @@ const xLabel = computed(() => {
   return (p: number) => {
     const c = columnAt(p)
     if (!c) return ''
-    return mode === 'distance' ? `${Math.round(c.s.distanceKm[c.i]!)} km` : fmtDate(c.s.time[c.i]!, withTime)
+    return mode === 'distance' ? `${Math.round(c.s.distanceKm[c.i]!)} km` : axisDate(c.s.time[c.i]!, withTime)
   }
 })
 
