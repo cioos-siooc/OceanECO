@@ -1,5 +1,5 @@
 import type { SeriesPoint } from './useAnalysisFetch';
-import type { ECharts } from 'echarts';
+import type { ECharts } from '@/utils/echarts';
 
 export const availableVariables = [
     { id: 'temperature', name: 'Temperature' },

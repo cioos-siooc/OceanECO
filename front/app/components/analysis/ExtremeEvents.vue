@@ -66,7 +66,7 @@ v-model="direction" :items="directionItems" size="sm" block
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import type { SeriesPoint } from '~~/composables/useAnalysisFetch'

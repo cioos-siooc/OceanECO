@@ -27,7 +27,7 @@ variant="ghost" color="neutral" size="xs" icon="i-mdi-close" class="shrink-0"
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import axios from 'axios'
 import moment from 'moment-timezone'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { useRuntimeConfig } from '#app'
 import { useMainStore } from '~/stores/main'
 import { APP_TIMEZONE } from '@/config/app'

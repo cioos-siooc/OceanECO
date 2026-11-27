@@ -35,7 +35,7 @@ variant="link" color="neutral" size="xs" icon="i-mdi-close" class="gp-x"
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { useMainStore, type GliderPin } from '~/stores/main'
 import { chart as palette } from '@/config/palette'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'

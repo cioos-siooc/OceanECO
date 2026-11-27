@@ -12,7 +12,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 
 /**

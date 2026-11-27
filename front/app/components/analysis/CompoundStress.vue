@@ -42,7 +42,7 @@ v-if="secondaryLoading" class="flex items-center justify-center"
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import type { SeriesPoint, AnalysisLocation } from '~~/composables/useAnalysisFetch'

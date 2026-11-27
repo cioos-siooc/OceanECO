@@ -34,7 +34,7 @@ v-if="statusMessage" class="profile-chart-overlay"
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRuntimeConfig } from '#app';
 import axios from 'axios';
-import * as echarts from 'echarts';
+import * as echarts from '@/utils/echarts';
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme';
 import type { PropType } from 'vue';
 import moment, { type MomentInput } from 'moment-timezone';

@@ -89,7 +89,7 @@ v-model="aroundDays" :min="0" :max="182" :step="1" size="xs" class="w-24"
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { useMainStore } from '@/stores/main'
 import { chart as chartPalette } from '@/config/palette'
 import SegmentedControl from '../ui/SegmentedControl.vue'

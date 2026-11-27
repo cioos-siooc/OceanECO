@@ -112,7 +112,7 @@ v-else-if="!hasData && !isLoading"
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import moment from 'moment-timezone'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useMainStore } from '../stores/main'

@@ -66,7 +66,7 @@ class="adv-sidebar p-3 flex flex-col"
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
 import { useMainStore } from '../stores/main'
 import { availableVariables } from '~~/composables/useAnalysisStatistics'

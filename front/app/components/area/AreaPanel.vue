@@ -81,7 +81,7 @@ variant="subtle" size="xs" leading-icon="i-mdi-circle-outline"
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import axios from 'axios'
 import moment from 'moment-timezone'
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { useRuntimeConfig } from '#app'
 import { useMainStore, type ObsArea, type ObsAreaMarker } from '~/stores/main'
 import { APP_TIMEZONE } from '@/config/app'

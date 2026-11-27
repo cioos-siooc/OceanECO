@@ -1,4 +1,4 @@
-import * as echarts from 'echarts'
+import * as echarts from '@/utils/echarts'
 import { chart as c } from '@/config/palette'
 
 let registered = false

@@ -20,6 +20,15 @@ export default defineNuxtConfig({
       { name: 'IBM Plex Mono', provider: 'google', weights: [400, 500] },
     ],
   },
+  vite: {
+    resolve: {
+      alias: {
+        // The default entry bundles every zone's full history (~700 KB); the app only needs America/Vancouver and UTC.
+        // shortcut: no DST data after 2030 (times then show the last offset), move to a later build or Intl before then.
+        'moment-timezone': 'moment-timezone/builds/moment-timezone-with-data-1970-2030.js',
+      },
+    },
+  },
   nitro: {
     externals: {
       inline: ['pinia'],
