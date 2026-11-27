@@ -94,7 +94,7 @@ pending_download → downloading → success_download → pending_compute → co
 - `SSC/compute.py` — derived variables (pH, Ω aragonite/calcite) via PyCO2SYS
 - `SSC/imaging.py` — hourly WebP tiles from NC via `nc2tile.py`; `image_daily_surface` renders `{var}/{date}/0.5.webp` from the date's daily rows
 - `SSC/ingest.py` — one date's NC → `_q` rows in both tables, then the daily surface tiles. Reads 6 hours at a time and inserts Native blocks built from numpy (clickhouse-connect's `insert_df` boxes nullable ints: ~19 GB a day). Replaces the date's existing rows, so reruns are safe. ~90 s, ~5 GB a day
-- `SSC/sync.py` — streams a date's rows to Native files, rsyncs them + the date's image dirs (hourly and daily) to the API machine (`cloudflared access ssh` ProxyCommand), then calls `POST /admin/syncHourly` and `/admin/syncDaily`
+- `SSC/sync.py` — streams a date's rows to Native files, rsyncs them + the date's image dirs (hourly and daily) to the API machine (`cloudflared access ssh` ProxyCommand), then calls `POST /admin/syncHourly` and `/admin/syncDaily` by running curl on the API host over that SSH (`SYNC_API_BASE_URL` = the API as seen there, e.g. `http://127.0.0.1:4000`; Cloudflare's proxy 524s requests open over ~100 s)
 
 `run` = `check → download → check_image → compute → check_image → image → promote → ingest → promote → sync`, defined once in `cli.pipeline_steps()`. Step helpers raise `cli.PipelineError` (not `sys.exit`) so they can run inside Prefect tasks.
 

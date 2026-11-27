@@ -225,6 +225,8 @@ CF_TOKEN_SECRET     = os.getenv('CF_TOKEN_SECRET', '')
 # writes, NOT the in-container /opt/data path. e.g. "/home/user/OA/data".
 SYNC_API_DATA_DIR = os.getenv('SYNC_API_DATA_DIR', '')
 
-# API machine base URL and shared bearer token for the import-trigger call.
+# API base URL as seen from the API machine's OWN host (e.g. http://127.0.0.1:4000):
+# sync.py runs curl there over SSH, since Cloudflare's proxy 524s the minutes-long
+# import. Plus the shared bearer token for the import-trigger call.
 SYNC_API_BASE_URL = os.getenv('SYNC_API_BASE_URL', '')
 SYNC_API_TOKEN    = os.getenv('SYNC_API_TOKEN', '')

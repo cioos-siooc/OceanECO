@@ -7,7 +7,8 @@ machine. Once a date finishes ingest, this stage:
   1. Exports that date's SalishSeaCast_hourly rows to a Native-format file.
   2. rsyncs the export file and the date's WebP image directories to the
      API machine.
-  3. Calls the API machine to import the export file into its own ClickHouse.
+  3. Calls the API machine to import the export file into its own ClickHouse
+     (curl run on the API machine over the same SSH connection; see _notify_api).
   4. Repeats 1-3 for that date's SalishSeaCast_daily row(s) — the per-cell
      daily means ingest.py derived from the same hourly NC read — against
      a separate native file and POST /admin/syncDaily.
@@ -28,14 +29,13 @@ CF_TOKEN_SECRET + API_SSH_HOST), not a persistent tunnel container.
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import os
 import shlex
 import shutil
 import subprocess
 from datetime import date, datetime, timedelta
-
-import requests
 
 from .config import (
     ALL_VARIABLES, IMAGE_BASE_DIR, API_SSH_HOST, API_SSH_KEY_PATH,
@@ -236,26 +236,44 @@ def _rsync_images(date_val: date, image_base_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _notify_api(date_val: date, expected_rows: int, endpoint: str = '/admin/syncHourly') -> None:
+    """POST the import trigger from the API machine itself, over SSH.
+
+    Not through the public hostname: Cloudflare's proxy 524s any request
+    still open after ~100 s, and a day's hourly import takes minutes.
+    SYNC_API_BASE_URL is therefore the API as seen from its own host
+    (e.g. http://127.0.0.1:4000).
+    """
     url = f'{SYNC_API_BASE_URL.rstrip("/")}{endpoint}'
-    resp = requests.post(
-        url,
-        json={'date': date_val.isoformat(), 'expected_rows': expected_rows},
-        headers={'Authorization': f'Bearer {SYNC_API_TOKEN}'},
-        # Must exceed the API's own ClickHouse client timeout
-        # (api/modules/clickhouse_helpers.py's _SEND_RECEIVE_TIMEOUT) — otherwise
-        # this request gives up first and reports a false failure for a
-        # multi-GB insert that's still legitimately in progress server-side.
-        timeout=1800,
+    body = json.dumps({'date': date_val.isoformat(), 'expected_rows': expected_rows})
+    # Must exceed the API's own ClickHouse client timeout
+    # (api/modules/clickhouse_helpers.py's _SEND_RECEIVE_TIMEOUT) — otherwise
+    # this gives up first and reports a false failure for a multi-GB insert
+    # that's still legitimately in progress server-side.
+    timeout = 1800
+    # The token goes in on stdin (-H @-), never on the remote command line
+    # where `ps` on the API machine would show it. -w appends the status code.
+    remote_cmd = (
+        f'curl -sS --max-time {timeout} -X POST -H @- '
+        f'-H "Content-Type: application/json" --data-raw {shlex.quote(body)} '
+        f"-w '\\n%{{http_code}}' {shlex.quote(url)}"
     )
-    if resp.status_code == 409:
+    proc = subprocess.run(
+        _ssh_opts_parts() + [_API_TARGET, remote_cmd],
+        input=f'Authorization: Bearer {SYNC_API_TOKEN}\n',
+        capture_output=True, text=True, timeout=timeout + 60,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f'{endpoint} call over ssh failed (exit {proc.returncode}): {proc.stderr.strip()}'
+        )
+    text, _, code = proc.stdout.rpartition('\n')
+    status = int(code)
+    if status == 409:
         logger.info('API machine already has %s synced via %s (409) — treating as success', date_val, endpoint)
         return
-    if not resp.ok:
-        # raise_for_status()'s own exception text doesn't include the response
-        # body, so the actual SyncError detail (api/SERVER.py's HTTPException)
-        # would otherwise be lost — log it explicitly before raising.
-        logger.error('API machine rejected %s via %s (%d): %s', date_val, endpoint, resp.status_code, resp.text)
-    resp.raise_for_status()
+    if not 200 <= status < 300:
+        logger.error('API machine rejected %s via %s (%d): %s', date_val, endpoint, status, text)
+        raise RuntimeError(f'API machine rejected {date_val} via {endpoint} ({status})')
 
 
 def _delete_local_hourly(client, date_val: date) -> None:
