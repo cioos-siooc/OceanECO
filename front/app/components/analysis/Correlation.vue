@@ -5,7 +5,7 @@
       <USelectMenu v-model="selectedVariables" :items="selectableVariables" label-key="name" value-key="id" class="mb-3 w-full" :return-object="false" multiple @update:model-value="onSelectionChange" />
 
       <template v-for="id in selectedVariables" :key="id">
-        <UAlert color="error" variant="subtle" class="mb-2" v-if="errorByVar[id]" :description="`${varName(id)}: ${errorByVar[id]}`" />
+        <UAlert v-if="errorByVar[id]" color="error" variant="subtle" class="mb-2" :description="`${varName(id)}: ${errorByVar[id]}`" />
       </template>
 
       <div class="text-gray-500 mt-2">
@@ -16,7 +16,8 @@
 
     <div class="grow flex" style="min-width:0;">
       <div style="width:50%; min-width:0; position:relative;" class="flex flex-col">
-        <div v-if="anyLoading" class="flex items-center justify-center"
+        <div
+v-if="anyLoading" class="flex items-center justify-center"
           style="position:absolute; inset:0; z-index:1; background:rgba(0,0,0,0.45);">
           <UIcon name="i-mdi-loading" class="animate-spin size-[40px] text-warning" />
         </div>

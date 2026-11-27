@@ -17,18 +17,21 @@
             Increase
             has
             Caused Critical Shifts in Aragonite Saturation Across a Sensitive Coastal System. Global
-            Biogeochemical Cycles, 36(7). <a href="https://doi.org/10.1029/2021GB007024" target="_blank"
+            Biogeochemical Cycles, 36(7). <a
+href="https://doi.org/10.1029/2021GB007024" target="_blank"
                 rel="noopener noreferrer">https://doi.org/10.1029/2021GB007024</a>
         </p>
         <p class="italic">
             Moore-Maley, B. L., S. E. Allen, and D. Ianson, 2016. Locally-driven interannual variability
             of
             near-surface pH and ΩA in the Strait of Georgia. J. Geophys. Res. Oceans, 121(3), 1600–1625.
-            <a href="https://dx.doi.org/10.1002/2015JC01111" target="_blank"
+            <a
+href="https://dx.doi.org/10.1002/2015JC01111" target="_blank"
                 rel="noopener noreferrer">https://dx.doi.org/10.1002/2015JC01111</a>
         </p>
         <p>
-            <a href="https://github.com/SalishSeaCast/docs/blob/main/CITATION.rst" target="_blank"
+            <a
+href="https://github.com/SalishSeaCast/docs/blob/main/CITATION.rst" target="_blank"
                 rel="noopener noreferrer">more</a>
         </p>
     </div>

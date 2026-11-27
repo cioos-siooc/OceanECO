@@ -1,5 +1,6 @@
 <template>
-    <UModal v-model:open="showDialog" :dismissible="false" :ui="{ content: 'max-w-[600px]' }"
+    <UModal
+v-model:open="showDialog" :dismissible="false" :ui="{ content: 'max-w-[600px]' }"
         @update:open="handleDialogToggle">
         <template #content>
         <div class="bg-elevated rounded-lg">

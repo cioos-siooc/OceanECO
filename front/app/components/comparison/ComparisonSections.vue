@@ -1,9 +1,10 @@
 <template>
-  <div class="sections flex flex-col h-full p-3" ref="rootRef">
+  <div ref="rootRef" class="sections flex flex-col h-full p-3">
     <div class="flex items-center mb-2" style="gap:8px;">
-      <SegmentedControl v-model="binMode" :items="binModeItems" size="xs" :disabled="loading"
+      <SegmentedControl
+v-model="binMode" :items="binModeItems" size="xs" :disabled="loading"
         aria-label="Time bin resolution" />
-      <UIcon name="i-mdi-loading" class="animate-spin size-[14px] text-teal-400" v-if="loading" />
+      <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-teal-400" />
       <span v-if="stats" class="stat-strip">
         bias {{ stats.bias }} &#183; r {{ stats.r }} &#183; RMSE {{ stats.rmse }} &#183; n {{ stats.n }}
         <span class="text-gray-500"> at {{ depthLabel }}</span>
@@ -14,7 +15,7 @@
       <UButton variant="ghost" size="xs" icon="i-mdi-chevron-right" class="shrink-0" :disabled="!canPageForward || loading" @click="page(1)" />
     </div>
 
-    <UAlert color="error" variant="subtle" class="mb-2 shrink-0" v-if="loadError" :description="loadError" />
+    <UAlert v-if="loadError" color="error" variant="subtle" class="mb-2 shrink-0" :description="loadError" />
 
     <!-- Same distinction Explore draws: a sensor moored outside the model
          domain has nothing to compare against, which is a fact about the
@@ -26,20 +27,22 @@
       icon="i-mdi-map-marker-off-outline"
       class="mb-2 shrink-0"
       close
-      @update:open="outOfDomainDismissed = true"
       title="Outside the SalishSeaCast model domain"
       :description="`This sensor sits ${outOfDomain.distanceKm.toFixed(0)} km from the nearest model cell, so there is no model section to compare against.`"
+      @update:open="outOfDomainDismissed = true"
     />
 
     <div class="grow" style="min-height:0;" @mouseleave="hoverCell = null">
       <div class="hm-slot" :style="{ height: panelH + 'px' }">
-        <TimeDepthHeatmap ref="modelPanel" label="MODEL" :depths="shownDepths" :values="shownModelGrid"
+        <TimeDepthHeatmap
+ref="modelPanel" label="MODEL" :depths="shownDepths" :values="shownModelGrid"
           :bin-count="binCount" :color-fn="colorFn" :gridline-bins="gridlineBins"
           :chart-group="CHART_GROUP" :mark-depth="markDepth" :mark-label="depthLabel"
           @cell-click="onCellClick" @hover="hoverCell = $event" />
       </div>
       <div class="hm-slot" :style="{ height: panelH + 'px' }">
-        <TimeDepthHeatmap ref="sensorPanel" label="SENSOR &#183; BINNED" :depths="shownDepths" :values="shownSensorGrid"
+        <TimeDepthHeatmap
+ref="sensorPanel" label="SENSOR &#183; BINNED" :depths="shownDepths" :values="shownSensorGrid"
           :bin-count="binCount" :color-fn="colorFn" :gridline-bins="gridlineBins"
           :chart-group="CHART_GROUP" :mark-depth="markDepth"
           show-x-axis :x-label="xLabel"

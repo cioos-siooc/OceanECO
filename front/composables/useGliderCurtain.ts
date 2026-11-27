@@ -773,7 +773,7 @@ export function cameraForAreaVolume(map: mapboxgl.Map, v: AreaCircle & { depthMi
     const rims = circleRing(v, 48).flatMap(ll => [v.depthMin, v.depthMax].map(d =>
         mapboxgl.MercatorCoordinate.fromLngLat(ll, -d * CURTAIN_EXAGGERATION)));
 
-    let c = mapboxgl.MercatorCoordinate.fromLngLat([v.lng, v.lat]);
+    const c = mapboxgl.MercatorCoordinate.fromLngLat([v.lng, v.lat]);
     let cx = c.x, cy = c.y;
     let zoom = map.getZoom();
     for (let it = 0; it < 8; it++) {

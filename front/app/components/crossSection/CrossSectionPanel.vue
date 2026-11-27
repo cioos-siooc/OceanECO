@@ -11,9 +11,10 @@
 
     <template v-else>
       <div class="flex items-center mb-2" style="gap:8px;">
-        <SegmentedControl v-model="binMode" :items="binModeItems" size="xs" :disabled="loading"
+        <SegmentedControl
+v-model="binMode" :items="binModeItems" size="xs" :disabled="loading"
           aria-label="Time bin resolution" />
-        <UIcon name="i-mdi-loading" class="animate-spin size-[14px] text-teal-400" v-if="loading" />
+        <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-teal-400" />
         <div class="grow" />
         <div class="time-controls-row mb-2">
           <TimeControls />
@@ -25,13 +26,14 @@
         <DownloadButton :datasets="csvDatasets" size="xs" class="shrink-0" />
       </div>
 
-      <UAlert color="error" variant="subtle" class="mb-2" v-if="loadError" :description="loadError" />
+      <UAlert v-if="loadError" color="error" variant="subtle" class="mb-2" :description="loadError" />
 
       <ChartContextBar :items="contextItems" />
 
       <div class="chart-region grow">
         <div class="hm-slot">
-          <TimeDepthHeatmap ref="panel" label="MODEL" :depths="depths" :values="grid" :bin-count="distances.length"
+          <TimeDepthHeatmap
+ref="panel" label="MODEL" :depths="depths" :values="grid" :bin-count="distances.length"
             :color-fn="seqColorFn" :gridline-bins="gridlineBins" :tooltip-formatter="cellTooltip" show-x-axis
             :x-label="xLabel" :mark-cell="selectedCell" @cell-click="onCellClick" />
           <!-- Segment-boundary markers. TimeDepthHeatmap's own gridlineBins is a
@@ -42,7 +44,8 @@
                same vertices on the map (see updateCrossSectionVertexLabels) — the
                numbers, not the dashes, are what ties a chart segment back to a
                specific point on the drawn line. -->
-          <div v-for="v in vertexMarks" :key="v.num" class="vertex-mark" :class="{ 'vertex-mark--edge': v.isEdge }"
+          <div
+v-for="v in vertexMarks" :key="v.num" class="vertex-mark" :class="{ 'vertex-mark--edge': v.isEdge }"
             :style="{ left: `calc(${AXIS_LEFT_PX}px + ${v.frac} * (100% - ${AXIS_LEFT_PX + DATAZOOM_RIGHT_PX}px))` }">
             <span class="vertex-num" :class="`vertex-num--${v.align}`">{{ v.num }}</span>
           </div>

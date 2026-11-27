@@ -29,11 +29,11 @@ import { computed, toRef, ref, watch } from 'vue';
 import moment from 'moment';
 
 import { useMainStore } from '../stores/main'
-const mainStore = useMainStore();
 
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
-const { variableLabel } = useVariableRegistry()
 import { utc2pst } from '~~/composables/useUTC2PST'
+const mainStore = useMainStore();
+const { variableLabel } = useVariableRegistry()
 
 ////////////////////////////////////// COMPUTED //////////////////////////////////////
 

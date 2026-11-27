@@ -5,7 +5,7 @@
       <div class="flex items-center gap-2 px-3 h-12 bg-elevated shrink-0">
         <div class="font-medium truncate">
           Analysis — {{ varName }}
-          <UBadge size="xs" color="warning" variant="subtle" class="ml-2 rounded-full" v-if="contextLabel">{{ contextLabel }}</UBadge>
+          <UBadge v-if="contextLabel" size="xs" color="warning" variant="subtle" class="ml-2 rounded-full">{{ contextLabel }}</UBadge>
         </div>
         <div class="grow" />
         <ShareButton />
@@ -28,9 +28,10 @@
             <SegmentedControl v-model="selectedSeason" :items="seasonItems" size="xs" aria-label="Season" />
           </div>
 
-          <UAlert color="error" variant="subtle" class="m-4" v-if="primaryError" :description="primaryError" />
+          <UAlert v-if="primaryError" color="error" variant="subtle" class="m-4" :description="primaryError" />
 
-          <div v-else-if="!location || !variable || depth == null"
+          <div
+v-else-if="!location || !variable || depth == null"
             class="grow flex flex-col items-center justify-center text-center px-6" style="min-height:0;">
             <UIcon name="i-mdi-poll" class="size-[56px] text-gray-500" />
             <div class="text-gray-500 mt-2">
@@ -38,19 +39,22 @@
             </div>
           </div>
 
-          <div v-else-if="primaryLoading && !primarySeries.length"
+          <div
+v-else-if="primaryLoading && !primarySeries.length"
             class="grow flex items-center justify-center" style="min-height:0;">
             <UIcon name="i-mdi-loading" class="animate-spin size-[48px] text-warning" />
           </div>
 
           <div v-else class="grow" style="min-height:0;">
             <ExtremeEvents v-if="activeTab === 'extremes'" :series="primarySeries" :season="selectedSeason" :variable="variable" />
-            <CompoundStress v-else-if="activeTab === 'compound'"
+            <CompoundStress
+v-else-if="activeTab === 'compound'"
               :primary-series="primarySeries" :primary-variable="variable" :season="selectedSeason"
               :depth="depth" :location="location" :year-range="yearRange" :fetch-series="fetchSeriesFor" />
             <Trend v-else-if="activeTab === 'trend'" :series="primarySeries" :season="selectedSeason" :variable="variable" />
             <Climatology v-else-if="activeTab === 'climatology'" :series="primarySeries" :season="selectedSeason" :variable="variable" />
-            <Correlation v-else-if="activeTab === 'correlation'"
+            <Correlation
+v-else-if="activeTab === 'correlation'"
               :primary-series="primarySeries" :primary-variable="variable" :season="selectedSeason"
               :depth="depth" :location="location" :year-range="yearRange" :fetch-series="fetchSeriesFor" />
           </div>

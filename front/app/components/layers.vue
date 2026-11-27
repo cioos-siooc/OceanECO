@@ -6,7 +6,7 @@
                   </UButton>
   <template #content>
     <div class="p-2 flex flex-col menu-content">
-                    <UButton size="sm" class="mb-1 noCap" v-for="variable in variables" :key="variable.var" @click="clickIcon(variable.var)" aria-label="Toggle layer 1">
+                    <UButton v-for="variable in variables" :key="variable.var" size="sm" class="mb-1 noCap" aria-label="Toggle layer 1" @click="clickIcon(variable.var)">
                         {{ variableLabel(variable.var) }}
                     </UButton>
                 </div>

@@ -2,11 +2,13 @@
   <div class="flex h-full" style="overflow:hidden;">
     <div class="p-2 flex flex-col shrink-0" style="width:200px; overflow-y:auto; border-right:1px solid rgba(255,255,255,0.08);">
       <div class="ctrl-label">Threshold Mode</div>
-      <SegmentedControl v-model="thresholdMode" :items="thresholdModeItems" size="sm" block
+      <SegmentedControl
+v-model="thresholdMode" :items="thresholdModeItems" size="sm" block
         class="mb-3" aria-label="Threshold mode" />
 
       <div class="ctrl-label">Direction</div>
-      <SegmentedControl v-model="direction" :items="directionItems" size="sm" block
+      <SegmentedControl
+v-model="direction" :items="directionItems" size="sm" block
         class="mb-3" aria-label="Event direction" />
 
       <template v-if="thresholdMode === 'percentile'">
@@ -37,11 +39,11 @@
       </div>
 
       <UAlert
+        v-if="thresholdMode === 'percentile' && isShortHistory"
         color="warning"
         variant="subtle"
         icon="i-mdi-alert-outline"
         class="mt-3"
-        v-if="thresholdMode === 'percentile' && isShortHistory"
         :description="shortHistoryWarning"
       />
     </div>

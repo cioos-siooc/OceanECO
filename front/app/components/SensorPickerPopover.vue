@@ -6,9 +6,10 @@
   >
     <div class="sensor-picker__title">Select sensor</div>
     <div class="sensor-picker__list p-0">
-      <div role="button" tabindex="0"
-        v-for="sensor in sortedSensors"
-        :key="sensor.id"
+      <div
+v-for="sensor in sortedSensors" :key="sensor.id"
+        role="button"
+        tabindex="0"
         class="sensor-picker__item"
         @click="pick(sensor)"
         @keydown.enter="pick(sensor)"

@@ -7,7 +7,8 @@
       </div>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary shrink-0" />
       <DownloadButton :datasets="csvDatasets" size="xs" class="shrink-0" />
-      <UButton variant="ghost" color="neutral" size="xs" icon="i-mdi-close" class="shrink-0"
+      <UButton
+variant="ghost" color="neutral" size="xs" icon="i-mdi-close" class="shrink-0"
         aria-label="Close profiles" @click="mainStore.setIsVerticalProfileOpen(false)" />
     </div>
 
@@ -15,7 +16,8 @@
       <span v-for="p in pins" :key="p.profile" class="gp-pin oe-num" :title="pinTitle(p)">
         <span class="gp-dot" :style="{ background: p.color }" />
         {{ pinLabel(p) }}
-        <UButton variant="link" color="neutral" size="xs" icon="i-mdi-close" class="gp-x"
+        <UButton
+variant="link" color="neutral" size="xs" icon="i-mdi-close" class="gp-x"
           :aria-label="`Remove ${pinLabel(p)}`" @click="mainStore.unpinGliderProfile(p.profile)" />
       </span>
       <UButton v-if="pins.length > 1" variant="ghost" color="neutral" size="xs" @click="mainStore.clearGliderPins()">Clear</UButton>

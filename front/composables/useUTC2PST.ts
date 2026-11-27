@@ -1,4 +1,4 @@
-import moment from 'moment-timezone'
+import type moment from 'moment-timezone'
 import { APP_TIMEZONE } from '@/config/app'
 
 /**

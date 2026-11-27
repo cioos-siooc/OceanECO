@@ -7,7 +7,8 @@
       </div>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary shrink-0" />
       <DownloadButton :datasets="csvDatasets" size="xs" class="shrink-0" />
-      <UButton variant="ghost" color="neutral" size="xs" icon="i-mdi-close" class="shrink-0"
+      <UButton
+variant="ghost" color="neutral" size="xs" icon="i-mdi-close" class="shrink-0"
         aria-label="Close cast" title="Back to the model profile" @click="emit('close')" />
     </div>
 

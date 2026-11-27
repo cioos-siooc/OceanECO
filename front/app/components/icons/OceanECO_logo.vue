@@ -1,5 +1,5 @@
 <template>
-  <canvas ref="canvasRef" :width="size" :height="size" :style="{ width: size + 'px', height: size + 'px' }"></canvas>
+  <canvas ref="canvasRef" :width="size" :height="size" :style="{ width: size + 'px', height: size + 'px' }"/>
 </template>
 
 <script setup>

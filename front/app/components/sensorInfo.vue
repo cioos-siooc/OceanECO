@@ -9,9 +9,11 @@
                  higher, and the badge says a filter is on while it's shut. -->
             <div class="sensors__head">
                 <div class="flex items-center gap-1">
-                    <SegmentedControl v-model="kind" :items="kindItems" size="xs" block class="grow sensors__kinds"
+                    <SegmentedControl
+v-model="kind" :items="kindItems" size="xs" block class="grow sensors__kinds"
                         aria-label="Instrument type" />
-                    <UButton size="xs" variant="ghost" color="neutral" class="shrink-0"
+                    <UButton
+size="xs" variant="ghost" color="neutral" class="shrink-0"
                         :icon="kindLayerOn ? 'i-mdi-eye-outline' : 'i-mdi-eye-off-outline'"
                         :aria-pressed="kindLayerOn"
                         :aria-label="`${kindLayerOn ? 'Hide' : 'Show'} ${kindNoun} on the map`"
@@ -20,7 +22,8 @@
                 </div>
                 <div v-if="kind !== 'casts'" class="flex items-center gap-1">
                     <UInput v-model="query" icon="i-mdi-magnify" :placeholder="`Search ${kindNoun}`" size="sm" class="grow" />
-                    <USelect v-model="sortMode" :items="sortItems" size="xs" variant="ghost"
+                    <USelect
+v-model="sortMode" :items="sortItems" size="xs" variant="ghost"
                         class="sensors__sort" aria-label="Sort" />
                     <UPopover v-if="kind === 'stations'" v-model:open="showFilters" :content="{ side: 'bottom', align: 'end' }">
                         <UButton
@@ -87,7 +90,8 @@
             </div>
 
             <div v-else-if="kind === 'stations'" class="sensors__list">
-                <div v-for="sensor in sortedSensors" :key="sensor.id" :ref="setSensorRef(sensor.id)"
+                <div
+v-for="sensor in sortedSensors" :key="sensor.id" :ref="setSensorRef(sensor.id)"
                     role="button" tabindex="0" class="srow" :class="{ 'srow--on': sensor.id === selectedSensor?.id }"
                     @click="selectSensor(sensor.id)" @keydown.enter="selectSensor(sensor.id)"
                     @mouseenter="mainStore.hoveredSensorId = sensor.id" @mouseleave="mainStore.hoveredSensorId = null">
@@ -115,7 +119,8 @@
                             <span>Measures</span>
                             <span>
                                 <template v-for="(varKey, k) in modelVariablesOf(sensor.variables)" :key="varKey">
-                                    <span v-if="k">, </span>{{ variableLabel(varKey) }}<span v-if="instrumentCount(sensor, varKey) > 1"
+                                    <span v-if="k">, </span>{{ variableLabel(varKey) }}<span
+v-if="instrumentCount(sensor, varKey) > 1"
                                         class="text-muted" :title="`${instrumentCount(sensor, varKey)} instruments measure this here`"> ×{{ instrumentCount(sensor, varKey) }}</span>
                                 </template>
                             </span>
@@ -123,7 +128,8 @@
                         <div class="srow__acts">
                             <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-information-outline" @click="openInfoDialog(sensor)">Details</UButton>
                             <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-chart-bar" @click="mainStore.setActiveBottomTab('comparison')">Compare with model</UButton>
-                            <UButton v-if="selectedInstruments.length > 1" size="xs" variant="outline" color="neutral"
+                            <UButton
+v-if="selectedInstruments.length > 1" size="xs" variant="outline" color="neutral"
                                 icon="i-mdi-compare-horizontal" :class="compareInstruments ? 'oe-on' : ''"
                                 :aria-pressed="compareInstruments"
                                 :title="`Plot each of the ${selectedInstruments.length} instruments that measure ${variableLabel(selectedVar)} here, with their differences`"
@@ -136,11 +142,13 @@
             <!-- C-PROOF gliders and Argo floats: they move, so a row shows
                  the distance travelled instead of a depth. -->
             <div v-else-if="kind === 'gliders' || kind === 'argo'" class="sensors__list">
-                <div v-for="g in sortedGliders" :key="g.id" :ref="setSensorRef(`glider:${g.id}`)"
+                <div
+v-for="g in sortedGliders" :key="g.id" :ref="setSensorRef(`glider:${g.id}`)"
                     role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
                     @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
                     @mouseenter="mainStore.hoveredGliderId = g.id" @mouseleave="mainStore.hoveredGliderId = null">
-                    <span class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
+                    <span
+class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
                         :title="g.kind === 'argo' ? (g.active ? 'Live: a profile in the last 30 days' : 'No recent profile') : (g.active ? 'Live: on mission now' : 'Recovered')" />
                     <span class="srow__name">{{ g.kind === 'argo' ? `Float ${g.glider}` : g.id }}</span>
                     <span class="srow__depth oe-num" :title="mainStore.gliderClips ? 'Along-track distance inside the observation period, of the whole mission' : undefined">
@@ -161,9 +169,11 @@
                             <span v-if="g.summary">Notes</span><span v-if="g.summary">{{ g.summary }}</span>
                         </div>
                         <div class="srow__acts">
-                            <UButton v-if="g.kind === 'argo'" size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
+                            <UButton
+v-if="g.kind === 'argo'" size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
                                 :to="g.fileUrl" target="_blank">Euro-Argo float page</UButton>
-                            <UButton v-else size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
+                            <UButton
+v-else size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
                                 :to="`https://cproof.uvic.ca/gliderdata/deployments/${g.glider}/${g.id}/`" target="_blank">C-PROOF page</UButton>
                         </div>
                     </div>
@@ -177,7 +187,8 @@
                 <div v-if="mainStore.castsTruncated" class="cast-period text-xs text-muted">
                     Showing the latest {{ mainStore.casts.length.toLocaleString('en-CA') }} of {{ mainStore.castsTotal.toLocaleString('en-CA') }}; narrow the observation period for the rest.
                 </div>
-                <div v-if="selectedCast" class="srow srow--on" role="button" tabindex="0"
+                <div
+v-if="selectedCast" class="srow srow--on" role="button" tabindex="0"
                     @click="mainStore.setIsVerticalProfileOpen(true)" @keydown.enter="mainStore.setIsVerticalProfileOpen(true)">
                     <span class="srow__dot srow__dot--historic" />
                     <span class="srow__name">{{ selectedCast.mission || selectedCast.id }}</span>

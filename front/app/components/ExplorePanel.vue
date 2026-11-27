@@ -1,9 +1,10 @@
 <template>
-  <div class="model-depth-profile flex flex-col h-full p-3" ref="rootRef">
+  <div ref="rootRef" class="model-depth-profile flex flex-col h-full p-3">
     <!-- A glider deployment is its own record, not keyed off the map point. -->
     <GliderSection v-if="viewMode === 'glider' && mainStore.selectedGliderId">
       <template #views>
-        <SegmentedControl :model-value="viewMode" :items="exploreSubViews" size="xs" aria-label="Explore view"
+        <SegmentedControl
+:model-value="viewMode" :items="exploreSubViews" size="xs" aria-label="Explore view"
           @update:model-value="(v) => mainStore.setExploreView(v as typeof viewMode.value)" />
       </template>
     </GliderSection>
@@ -46,7 +47,7 @@
           :disabled="loading"
           aria-label="Time bin resolution"
         />
-        <UIcon name="i-mdi-loading" class="animate-spin size-[14px] text-primary" v-if="loading" />
+        <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
 
         <div class="grow" />
 
@@ -95,11 +96,11 @@
         icon="i-mdi-map-marker-off-outline"
         class="mb-2 shrink-0"
         close
-        @update:open="outOfDomainDismissed = true"
         :title="`Outside the SalishSeaCast model domain (nearest model cell is ${outOfDomain.distanceKm.toFixed(0)} km away)`"
         :description="sensorMeta
           ? `No model values here — the chart shows ${sensorMeta.name} only, at its own depth of ${sensorMeta.depthLabel}.`
           : 'No model values here. Pick a point inside the Salish Sea, or select a sensor at this location.'"
+        @update:open="outOfDomainDismissed = true"
       />
 
       <ChartContextBar :items="contextItems" />
@@ -110,7 +111,8 @@
              what the Comparison tab is for; this tab answers "what does this one
              record look like through the water column". -->
         <div v-if="showSection" class="hm-slot" :style="{ height: sectionH + 'px' }">
-          <TimeDepthHeatmap ref="modelPanel" :label="panelLabel" :depths="shownDepths" :values="shownGrid"
+          <TimeDepthHeatmap
+ref="modelPanel" :label="panelLabel" :depths="shownDepths" :values="shownGrid"
             :bin-count="binCount" :color-fn="seqColorFn" :gridline-bins="gridlineBins" :mark-cell="shownSelectedCell"
             :tooltip-formatter="cellTooltip" show-x-axis :x-label="xLabel" @cell-click="onCellClick" />
         </div>
@@ -136,7 +138,8 @@
         </div>
 
         <div v-if="!showSection" class="line-slot" :style="{ height: chartH + 'px' }">
-          <TimeseriesChart ref="lineChart" :window-start="windowStart" :window-end="chartWindowEnd"
+          <TimeseriesChart
+ref="lineChart" :window-start="windowStart" :window-end="chartWindowEnd"
             :grid-left="AXIS_LEFT_PX" :grid-right="DATAZOOM_RIGHT_PX" legend-layout="top" :bin-mode="binMode" />
           <!-- Out-of-domain already has the alert above; repeating it across the
                plot labels a chart that is drawing real sensor data as empty. -->

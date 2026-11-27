@@ -3,7 +3,8 @@
     <div class="p-2 flex flex-col shrink-0" style="width:220px; overflow-y:auto; border-right:1px solid rgba(255,255,255,0.08);">
       <div class="ctrl-label">Primary variable</div>
       <div class="mb-3">{{ varName(primaryVariable) }} {{ primaryDirection === '>' ? '>' : '<' }} {{ primaryThreshold }}{{ displayUnit(primaryVariable) ? ` ${displayUnit(primaryVariable)}` : '' }}</div>
-      <SegmentedControl v-model="primaryDirection" :items="directionItems" size="xs" block
+      <SegmentedControl
+v-model="primaryDirection" :items="directionItems" size="xs" block
         class="mb-1" aria-label="Primary threshold direction" />
       <UInput v-model.number="primaryThreshold" type="number" class="mb-3">
   <template #trailing><span class="text-xs text-muted">{{ displayUnit(primaryVariable) }}</span></template>
@@ -11,17 +12,19 @@
 
       <div class="ctrl-label">Compare against</div>
       <USelectMenu v-model="secondaryVariable" :items="otherVariables" label-key="name" value-key="id" class="mb-3 w-full" />
-      <SegmentedControl v-model="secondaryDirection" :items="directionItems" size="xs" block
+      <SegmentedControl
+v-model="secondaryDirection" :items="directionItems" size="xs" block
         class="mb-1" aria-label="Secondary threshold direction" />
       <UInput v-model.number="secondaryThreshold" type="number" class="mb-3">
   <template #trailing><span class="text-xs text-muted">{{ displayUnit(secondaryVariable) }}</span></template>
 </UInput>
 
-      <UAlert color="error" variant="subtle" class="mt-2" v-if="secondaryError" :description="secondaryError" />
+      <UAlert v-if="secondaryError" color="error" variant="subtle" class="mt-2" :description="secondaryError" />
     </div>
 
     <div class="grow flex flex-col" style="min-width:0; position:relative;">
-      <div v-if="secondaryLoading" class="flex items-center justify-center"
+      <div
+v-if="secondaryLoading" class="flex items-center justify-center"
         style="position:absolute; inset:0; z-index:1; background:rgba(0,0,0,0.45);">
         <UIcon name="i-mdi-loading" class="animate-spin size-[40px] text-warning" />
       </div>

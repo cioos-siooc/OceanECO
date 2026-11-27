@@ -26,7 +26,7 @@
       <UButton variant="ghost" color="neutral" size="xs" to="/about" target="_blank">About</UButton>
 
       <a href="https://cioospacific.ca/" target="_blank" rel="noopener noreferrer" class="partner-link" title="CIOOS Pacific">
-        <img src="/cioos_pacific.png" alt="CIOOS Pacific" class="partner-logo" />
+        <img src="/cioos_pacific.png" alt="CIOOS Pacific" class="partner-logo" >
       </a>
     </header>
 

@@ -7,7 +7,7 @@
             </div>
 
             <div class="flex flex-wrap -m-3">
-                <div class="p-3 w-1/2" v-for="video in videos" :key="video.filename">
+                <div v-for="video in videos" :key="video.filename" class="p-3 w-1/2">
                     <div class="rounded-lg m-3 p-5" :title="video.title">
                         <video :src="`/guide/${video.filename}.webm`" :poster="`/guide/${video.filename}.webp`" controls playsinline class="block w-full aspect-video rounded" />
                     </div>

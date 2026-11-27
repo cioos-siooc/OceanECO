@@ -4,13 +4,16 @@
       <!-- Explore's own sub-view switch, passed in so it stays in one place. -->
       <slot name="views" />
       <SegmentedControl v-model="xAxis" :items="xAxisItems" size="xs" aria-label="Horizontal axis" />
-      <UButton size="xs" variant="outline" color="neutral" :class="tilted ? 'oe-on' : ''"
+      <UButton
+size="xs" variant="outline" color="neutral" :class="tilted ? 'oe-on' : ''"
         :aria-pressed="tilted" title="Tilt the map onto this track to see the section hanging under it, or back to flat"
         @click="mainStore.toggleGliderTilt()">3D</UButton>
-      <UButton size="xs" variant="outline" color="neutral" :class="mainStore.showSeafloor ? 'oe-on' : ''"
+      <UButton
+size="xs" variant="outline" color="neutral" :class="mainStore.showSeafloor ? 'oe-on' : ''"
         :aria-pressed="mainStore.showSeafloor" title="Show the seafloor around the track when the map is tilted"
         @click="mainStore.setShowSeafloor(!mainStore.showSeafloor)">Seafloor</UButton>
-      <UButton v-if="mainStore.gliderRange" size="xs" variant="ghost" color="neutral" icon="i-mdi-arrow-expand-horizontal"
+      <UButton
+v-if="mainStore.gliderRange" size="xs" variant="ghost" color="neutral" icon="i-mdi-arrow-expand-horizontal"
         title="Zoom back out to the whole deployment" @click="mainStore.setGliderRange(null)">Whole track</UButton>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
       <div class="grow" />
@@ -32,7 +35,8 @@
     <template v-else>
       <ChartContextBar :items="contextItems" />
       <div class="hm-slot">
-        <GliderSectionChart v-if="overview" :key="glider!.id" :label="`${glider!.kind === 'argo' ? 'ARGO FLOAT' : 'GLIDER'} · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
+        <GliderSectionChart
+v-if="overview" :key="glider!.id" :label="`${glider!.kind === 'argo' ? 'ARGO FLOAT' : 'GLIDER'} · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
           :overview="overview" :detail="detail" :extent="section!.extent" :range="mainStore.gliderRange"
           :rgb-fn="rgbFn" :x-label="xLabel" :tooltip-formatter="cellTooltip" :marks="mainStore.gliderPins"
           @range="mainStore.setGliderRange($event)" @pick="(p, add) => mainStore.pinGliderProfile(p, add)" @hover="onHover" />

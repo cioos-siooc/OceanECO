@@ -10,11 +10,11 @@
       </div>
 
       <UAlert
+        v-if="isShortHistory"
         color="warning"
         variant="subtle"
         icon="i-mdi-alert-outline"
         class="mt-3"
-        v-if="isShortHistory"
         :description="shortHistoryWarning"
       />
     </div>

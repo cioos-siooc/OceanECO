@@ -1,7 +1,7 @@
 <template>
     <div style="display: flex; align-items: flex-end; gap: 8px;">
         <div style="flex: 1; min-width: 0;">
-            <div class="bar" :style="barStyle"></div>
+            <div class="bar" :style="barStyle"/>
             <!-- Rounded ticks placed at their true position on the ramp, rather
                  than the raw min/mid/max of the colour range (0.01 · 12.51 · 25.00). -->
             <div class="ticks oe-num">
@@ -15,7 +15,8 @@
                       </button>
   <template #content>
     <div class="py-1">
-                        <div v-for="u in unitOptions" :key="u" role="button" tabindex="0"
+                        <div
+v-for="u in unitOptions" :key="u" role="button" tabindex="0"
                             class="px-3 py-1 text-sm cursor-pointer hover:bg-elevated"
                             :class="u === unit ? 'text-primary font-medium' : ''"
                             @click="mainStore.setUnitPreference(selectedVariable.var, u)">

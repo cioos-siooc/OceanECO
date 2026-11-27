@@ -7,7 +7,8 @@
           Comparison — {{ varName }}
           <span v-if="sensorName" class="text-muted font-normal"> · {{ sensorName }}</span>
         </div>
-        <UButton v-if="sensorInfo" variant="soft" color="neutral" size="xs" icon="i-mdi-information-outline"
+        <UButton
+v-if="sensorInfo" variant="soft" color="neutral" size="xs" icon="i-mdi-information-outline"
           label="Sensor details" class="shrink-0" @click="showSensorInfo = true" />
         <div class="grow" />
         <ShareButton />
@@ -42,7 +43,8 @@
             <div v-else ref="chartRef" class="grow" style="min-height:0;" />
           </div>
 
-          <div class="adv-sidebar p-3 flex flex-col"
+          <div
+class="adv-sidebar p-3 flex flex-col"
             style="width:240px; min-width:240px; border-left:1px solid rgba(255,255,255,0.08); overflow-y:auto;">
             <div class="ctrl-label mb-1">About</div>
             <p class="mb-4" style="line-height:1.6; color:rgba(255,255,255,0.6);">{{ tabDescription }}</p>

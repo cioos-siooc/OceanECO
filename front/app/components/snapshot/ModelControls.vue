@@ -7,7 +7,8 @@
         <label class="oe-label" for="source-select">Model</label>
         <button type="button" class="mc__link" title="About this model" @click="showSourceInfo = true">About</button>
       </div>
-      <USelectMenu id="source-select" v-model="selectedSource" :items="sourceItems" label-key="label" value-key="source"
+      <USelectMenu
+id="source-select" v-model="selectedSource" :items="sourceItems" label-key="label" value-key="source"
         :disabled="sourceItems.length === 0" :search-input="false" size="xs" class="w-full" />
     </div>
 
@@ -19,7 +20,8 @@
         <span v-if="depthIndex >= 0" class="mc__meta oe-num">{{ depthIndex + 1 }} / {{ depths.length }}</span>
       </div>
       <div class="flex items-stretch">
-        <USelectMenu id="depth-select" v-model="selectedDepth" :items="depths" label-key="title" value-key="value"
+        <USelectMenu
+id="depth-select" v-model="selectedDepth" :items="depths" label-key="title" value-key="value"
           size="xs" class="grow min-w-0 oe-num" :ui="{ base: 'rounded-e-none' }" />
         <button type="button" class="mc__step" :disabled="depthIndex <= 0" title="Shallower level" aria-label="Shallower level" @click="step(-1)">
           <UIcon name="i-mdi-chevron-up" class="size-[14px]" />

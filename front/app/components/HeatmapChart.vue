@@ -1,7 +1,7 @@
 <template>
     <div class="bg-elevated rounded-lg p-4" style="width: 100%; height: 100%;">
         <div class="flex flex-wrap -m-3">
-            <div class="p-3 w-full" v-if="showDateWarning">
+            <div v-if="showDateWarning" class="p-3 w-full">
                 <UAlert color="warning" variant="subtle" :description="dateWarning" />
             </div>
 
@@ -31,7 +31,8 @@
                   }}</UButton>
   <template #content>
     <div class="bg-elevated rounded-lg">
-                            <UCalendar v-model="pendingCalendarRange" range :min-value="minCalendarDate"
+                            <UCalendar
+v-model="pendingCalendarRange" range :min-value="minCalendarDate"
                                 :max-value="maxCalendarDate" class="m-0 p-0" />
                             <div class="flex items-center gap-2 px-2 py-2">
                                 <div class="grow" />
@@ -45,7 +46,7 @@
 
         </div>
 
-        <div ref="chartContainer" style="width: 100%; height: 100%;"></div>
+        <div ref="chartContainer" style="width: 100%; height: 100%;"/>
         <div v-if="loading" class="global-chart-overlay">
             <UIcon name="i-mdi-loading" class="animate-spin text-warning progress" :style="{ fontSize: 64 + 'px' }" />
         </div>
@@ -63,10 +64,10 @@ import moment from 'moment';
 import { useMainStore } from '../stores/main';
 import { resolveColormap } from '~~/composables/useColormapResolver';
 import { useVariableRegistry } from '~~/composables/useVariableRegistry';
-const mainStore = useMainStore();
-const { variableLabel, modelVariablesOf, formatDisplayValue } = useVariableRegistry();
 
 import colors from '@/config/palette';
+const mainStore = useMainStore();
+const { variableLabel, modelVariablesOf, formatDisplayValue } = useVariableRegistry();
 
 const config = useRuntimeConfig();
 const apiBaseUrl = config.public.apiBaseUrl

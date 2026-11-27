@@ -1,6 +1,6 @@
 <template>
     <div class="global-chart-wrapper" style="width: 100%; height: 100%;">
-        <div ref="chartContainer" style="width: 100%; height: 100%;"></div>
+        <div ref="chartContainer" style="width: 100%; height: 100%;"/>
         <div v-if="loading" class="global-chart-overlay">
             <UIcon name="i-mdi-loading" class="animate-spin text-warning progress" :style="{ fontSize: 64 + 'px' }" />
         </div>
@@ -28,6 +28,12 @@ import { computeNightRanges } from '~~/composables/useSunCalc';
 import moment from 'moment-timezone';
 import { APP_TIMEZONE } from '@/config/app';
 import { chart as chartPalette } from '@/config/palette';
+import timeseriesChartHelpImg from '../../public/timeseriesChartHelp.png';
+
+import { useMainStore } from '../stores/main';
+import { useVariableRegistry } from '~~/composables/useVariableRegistry';
+import { csvMeta, csvTimestamp, useCsvExport, type CsvDataset } from '~~/composables/useCsvExport';
+import { describeObsFilter, matchesTime, matchingIntervals } from '@/utils/obsFilter';
 
 // The two vertical markers on the time axis: "Now" is context (muted, dashed),
 // "Map" is the instant the raster shows, so it takes the accent.
@@ -43,12 +49,6 @@ const MAP_MARK = {
 // over a long window) it would only be noise.
 const OUTSIDE_PERIOD_FILL = chartPalette.outsidePeriod;
 const MAX_PERIOD_BANDS = 400;
-import timeseriesChartHelpImg from '../../public/timeseriesChartHelp.png';
-
-import { useMainStore } from '../stores/main';
-import { useVariableRegistry } from '~~/composables/useVariableRegistry';
-import { csvMeta, csvTimestamp, useCsvExport, type CsvDataset } from '~~/composables/useCsvExport';
-import { describeObsFilter, matchesTime, matchingIntervals } from '@/utils/obsFilter';
 const mainStore = useMainStore();
 const { displayUnit, variableDecimals, formatDisplayValue } = useVariableRegistry();
 
@@ -330,7 +330,7 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
     const endLocal = windowEndLocal.value.clone();
 
     // Night mark areas
-    let markAreaData: any[] = [];
+    const markAreaData: any[] = [];
     if (!dayNightVisible.value) {
         // Left empty: across a multi-year window the bands collapse into noise.
     } else if (typeof lat === 'number' && typeof lng === 'number') {

@@ -2,7 +2,8 @@
   <div class="comparison-panel flex flex-col h-full" style="overflow:hidden;">
 
     <!-- HEADER STRIP -->
-    <div class="flex items-center px-3 shrink-0"
+    <div
+class="flex items-center px-3 shrink-0"
       style="height:30px; border-bottom:1px solid rgba(255,255,255,0.08); gap:8px;">
       <!-- Sensor and variable are in the workspace header; only the depth is new here. -->
       <span class="truncate text-muted" style="min-width:0;">
@@ -11,9 +12,10 @@
       <div class="grow" />
       <!-- Daily spans the whole record; hourly trades that reach for a fortnight
            at native cadence, where tidal and diurnal structure is visible. -->
-      <SegmentedControl v-model="resolution" :items="resolutionItems" size="xs" :disabled="isLoading"
+      <SegmentedControl
+v-model="resolution" :items="resolutionItems" size="xs" :disabled="isLoading"
         class="shrink-0 mr-2" aria-label="Time resolution" />
-      <UIcon name="i-mdi-loading" class="animate-spin size-[14px] text-warning shrink-0" v-if="isLoading" />
+      <UIcon v-if="isLoading" name="i-mdi-loading" class="animate-spin size-[14px] text-warning shrink-0" />
       <span v-if="isLoading" class="text-gray-500 shrink-0">{{ loadingStep }}</span>
       <UBadge v-if="stats && stats.n > 0" variant="subtle" class="rounded-full shrink-0">
         {{ stats.n }} days
@@ -26,18 +28,21 @@
       <!-- TIME SERIES CHART -->
       <div class="grow flex flex-col" style="min-width:0; overflow:hidden; position:relative;">
 
-        <div v-show="hasData" ref="timeseriesContainerRef" class="w-full h-full"
+        <div
+v-show="hasData" ref="timeseriesContainerRef" class="w-full h-full"
           :class="{ 'chart-loading': isLoading && hasData }" />
 
-        <div v-if="isLoading && !hasData"
+        <div
+v-if="isLoading && !hasData"
           class="flex flex-col items-center justify-center h-full">
           <UIcon name="i-mdi-loading" class="animate-spin size-[36px] text-warning mb-2" />
           <div class="text-warning">{{ loadingStep }}</div>
         </div>
 
-        <UAlert color="error" variant="subtle" class="m-3" v-else-if="!hasData && errorMessage" :description="errorMessage" />
+        <UAlert v-else-if="!hasData && errorMessage" color="error" variant="subtle" class="m-3" :description="errorMessage" />
 
-        <div v-else-if="isVariableDepth && sensorInfo && !hasData"
+        <div
+v-else-if="isVariableDepth && sensorInfo && !hasData"
           class="flex flex-col items-center justify-center h-full text-center px-6">
           <UIcon name="i-mdi-chart-timeline-variant" class="size-[48px] text-teal-400" />
           <div class="text-gray-400 mt-2" style="max-width:280px;">
@@ -47,7 +52,8 @@
           </div>
         </div>
 
-        <div v-else-if="!hasData && !isLoading"
+        <div
+v-else-if="!hasData && !isLoading"
           class="flex flex-col items-center justify-center h-full text-center px-6">
           <UIcon name="i-mdi-compare-horizontal" class="size-[48px] text-gray-500" />
           <div class="text-gray-500 mt-2">Select a sensor to load the comparison</div>
@@ -55,11 +61,13 @@
       </div>
 
       <!-- RIGHT: Season filter + Stats -->
-      <div class="comparison-stats p-2 flex flex-col"
+      <div
+class="comparison-stats p-2 flex flex-col"
         style="width:210px; min-width:210px; border-left:1px solid rgba(255,255,255,0.08); overflow:hidden;">
 
         <div class="ctrl-label mb-1">Season</div>
-        <SegmentedControl v-model="selectedSeason" :items="seasonItems" size="xs" block
+        <SegmentedControl
+v-model="selectedSeason" :items="seasonItems" size="xs" block
           item-class="px-1 min-w-0" class="mb-3" aria-label="Season" />
 
         <template v-if="stats && stats.n > 0">
@@ -85,7 +93,8 @@
           </div>
         </template>
 
-        <div v-else-if="!hasData && !isLoading"
+        <div
+v-else-if="!hasData && !isLoading"
           class="flex items-center justify-center grow">
           <div class="text-gray-500 text-center">Stats appear<br>after loading</div>
         </div>

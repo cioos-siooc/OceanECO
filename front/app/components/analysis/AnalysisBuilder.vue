@@ -2,7 +2,8 @@
   <div class="analytics-panel flex h-full" style="overflow:hidden;">
 
     <!-- LEFT: Controls -->
-    <div class="analytics-sidebar p-2 flex flex-col"
+    <div
+class="analytics-sidebar p-2 flex flex-col"
       style="width:190px; min-width:190px; overflow-y:auto; border-right:1px solid rgba(255,255,255,0.08);">
 
       <div class="flex items-center justify-between mb-2">
@@ -10,11 +11,13 @@
       </div>
 
       <div class="ctrl-label">Season</div>
-      <SegmentedControl v-model="selectedSeason" :items="seasonItems" size="xs" block
+      <SegmentedControl
+v-model="selectedSeason" :items="seasonItems" size="xs" block
         item-class="px-1 min-w-0" class="mb-3" aria-label="Season" />
 
       <div class="ctrl-label">Statistic</div>
-      <SegmentedControl v-model="primaryStat" :items="statItems" size="sm" block variant="outline"
+      <SegmentedControl
+v-model="primaryStat" :items="statItems" size="sm" block variant="outline"
         class="mb-3" aria-label="Statistic" />
 
       <div class="grow" />
@@ -23,7 +26,8 @@
     <!-- CENTER: Chart -->
     <div class="grow flex flex-col" style="min-width:0; overflow:hidden;">
 
-      <div class="flex items-center px-2 shrink-0"
+      <div
+class="flex items-center px-2 shrink-0"
         style="height:28px; border-bottom:1px solid rgba(255,255,255,0.06);">
         <span class="font-medium truncate">{{ chartTitle }}</span>
         <div class="grow" />
@@ -33,11 +37,13 @@
       <div class="grow" style="position:relative; min-height:0;">
 
         <!-- Chart — stays mounted once first render; greyscale while reloading -->
-        <div v-show="hasActivePlot" ref="chartContainerRef" class="w-full h-full"
+        <div
+v-show="hasActivePlot" ref="chartContainerRef" class="w-full h-full"
           :class="{ 'chart-loading': isGenerating }" />
 
         <!-- First-time load spinner (no chart yet) -->
-        <div v-if="isGenerating && !hasActivePlot"
+        <div
+v-if="isGenerating && !hasActivePlot"
           class="flex flex-col items-center justify-center h-full">
           <UIcon name="i-mdi-loading" class="animate-spin size-[36px] text-warning mb-2" />
           <div class="text-warning">Querying ClickHouse...</div>
@@ -49,9 +55,10 @@
           <span>Updating…</span>
         </div>
 
-        <UAlert color="error" variant="subtle" class="m-3" v-else-if="!hasActivePlot && plotErrorMessage" :description="plotErrorMessage" />
+        <UAlert v-else-if="!hasActivePlot && plotErrorMessage" color="error" variant="subtle" class="m-3" :description="plotErrorMessage" />
 
-        <div v-else-if="!hasActivePlot && !isGenerating && !plotErrorMessage"
+        <div
+v-else-if="!hasActivePlot && !isGenerating && !plotErrorMessage"
           class="flex flex-col items-center justify-center h-full text-center px-6">
           <UIcon name="i-mdi-poll" class="size-[56px] text-gray-500" />
           <div class="text-gray-500 mt-2">Select a point on the map — analysis loads
@@ -61,7 +68,8 @@
     </div>
 
     <!-- RIGHT: Stats panel -->
-    <div class="analytics-stats p-2 flex flex-col"
+    <div
+class="analytics-stats p-2 flex flex-col"
       style="width:215px; min-width:215px; overflow:hidden; border-left:1px solid rgba(255,255,255,0.08);">
 
       <template v-if="extremeRecords">

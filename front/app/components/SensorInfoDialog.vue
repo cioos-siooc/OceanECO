@@ -3,12 +3,12 @@
          (sensorInfo.vue) and from the Comparison workspace header. -->
     <UModal v-model:open="open" :ui="{ content: 'max-w-[480px]' }">
         <template #content>
-        <div class="bg-elevated rounded-lg" v-if="sensor">
+        <div v-if="sensor" class="bg-elevated rounded-lg">
             <div class="px-4 pt-4 pb-2 text-lg flex items-center">
                 <UIcon name="i-mdi-circle" :style="{ color: sensorStatusColor(sensor) }" class="size-[14px] mr-2" />
                 {{ sensor.name }}
             </div>
-            <div class="px-4 pb-2 text-sm text-muted" v-if="sensor.organization">{{ sensor.organization }}</div>
+            <div v-if="sensor.organization" class="px-4 pb-2 text-sm text-muted">{{ sensor.organization }}</div>
             <div class="px-4 py-3">
                 <div>
                     <div class="px-4 py-1"><div class="text-muted text-xs">Location</div>
@@ -23,20 +23,21 @@
                     <div class="px-4 py-1"><div class="text-muted text-xs">Variables</div>
                         <!-- Sensors with nothing to download (ONC, or an ERDDAP link of an
                              unrecognized layout) fall back to a plain list. -->
-                        <div class="text-sm" v-if="!downloads?.variables.length">
+                        <div v-if="!downloads?.variables.length" class="text-sm">
                             {{ variables.map(variableLabel).join(', ') }}
                         </div>
                         <div v-else>
-                            <div v-for="v in downloads.variables" :key="v.canonical"
+                            <div
+v-for="v in downloads.variables" :key="v.canonical"
                                 class="flex items-center gap-1 mt-2">
                                 <span class="var-name">{{ variableLabel(v.canonical) }}</span>
-                                <UButton variant="subtle" size="xs" color="neutral" v-if="v.nc" leading-icon="i-mdi-download" :href="v.nc" target="_blank" rel="noopener">
+                                <UButton v-if="v.nc" variant="subtle" size="xs" color="neutral" leading-icon="i-mdi-download" :href="v.nc" target="_blank" rel="noopener">
                                     NetCDF
                                 </UButton>
-                                <UButton variant="subtle" size="xs" color="neutral" v-if="v.csv" leading-icon="i-mdi-download" :href="v.csv" target="_blank" rel="noopener">
+                                <UButton v-if="v.csv" variant="subtle" size="xs" color="neutral" leading-icon="i-mdi-download" :href="v.csv" target="_blank" rel="noopener">
                                     CSV
                                 </UButton>
-                                <UButton variant="subtle" size="xs" color="neutral" v-if="v.page" leading-icon="i-mdi-open-in-new" :href="v.page" target="_blank" rel="noopener">
+                                <UButton v-if="v.page" variant="subtle" size="xs" color="neutral" leading-icon="i-mdi-open-in-new" :href="v.page" target="_blank" rel="noopener">
                                     Oceans 3.0
                                 </UButton>
                             </div>
@@ -53,7 +54,7 @@
             </div>
             <USeparator v-if="downloads" />
             <div class="flex items-center gap-2 px-2 py-2">
-                <UButton variant="subtle" size="xs" v-if="downloads?.dataset" leading-icon="i-mdi-open-in-new" :href="downloads.dataset" target="_blank" rel="noopener">
+                <UButton v-if="downloads?.dataset" variant="subtle" size="xs" leading-icon="i-mdi-open-in-new" :href="downloads.dataset" target="_blank" rel="noopener">
                     Go to {{ downloads.api }}
                 </UButton>
                 <div class="grow" />
@@ -66,7 +67,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useMainStore } from '@/stores/main';
+import type { useMainStore } from '@/stores/main';
 import { sensorStatusColor } from '~~/composables/useSensorStatus';
 import { sensorDownloads } from '~~/composables/useSensorDownloadLinks';
 import { useVariableRegistry } from '~~/composables/useVariableRegistry';

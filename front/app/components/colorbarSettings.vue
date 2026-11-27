@@ -13,7 +13,7 @@
         </div>
 
         <div class="bar-track">
-            <div class="bar" :style="barStyle"></div>
+            <div class="bar" :style="barStyle"/>
         </div>
 
         <!-- PALETTE -->

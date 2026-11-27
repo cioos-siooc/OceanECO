@@ -1,5 +1,6 @@
 <template>
-    <aside v-show="isOpen" class="control-panel absolute left-0 top-0 h-full bg-muted border-r border-default"
+    <aside
+v-show="isOpen" class="control-panel absolute left-0 top-0 h-full bg-muted border-r border-default"
         :style="{ width: mainStore.controlPanel_width + 'px', zIndex: 999 }">
         <div class="sensors-block">
             <sensorInfo />

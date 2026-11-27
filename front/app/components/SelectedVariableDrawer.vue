@@ -1,5 +1,6 @@
 <template>
-    <aside v-show="isOpen" class="p-2 absolute right-0 top-0 h-full w-[300px] overflow-y-auto bg-muted border-l border-default"
+    <aside
+v-show="isOpen" class="p-2 absolute right-0 top-0 h-full w-[300px] overflow-y-auto bg-muted border-l border-default"
         style="z-index:999;">
         <!-- A selected ship cast takes the drawer over: it is a vertical profile
              too, and the model's own one is overlaid on it there. -->
@@ -17,10 +18,11 @@
         </div>
 
         <div class="profile-chart-wrapper">
-            <div ref="chartContainer" class="profile-chart"></div>
-            <div v-if="statusMessage" class="profile-chart-overlay"
+            <div ref="chartContainer" class="profile-chart"/>
+            <div
+v-if="statusMessage" class="profile-chart-overlay"
                 :class="{ loading: loading, error: !!errorMessage }">
-                <UIcon name="i-mdi-loading" class="animate-spin text-warning progress" :style="{ fontSize: 64 + 'px' }" v-if="loading" />
+                <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin text-warning progress" :style="{ fontSize: 64 + 'px' }" />
                 <span v-else>{{ statusMessage }}</span>
             </div>
         </div>

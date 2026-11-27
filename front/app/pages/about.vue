@@ -26,7 +26,8 @@
                             temperature, salinity, pH, oxygen content, and the 'corrosiveness' of seawater to shelled
                             organisms across southern to central BC.
                             <br><br>
-                            To learn more, visit <a href="https://www.oceanacidification.ca/" target="_blank"
+                            To learn more, visit <a
+href="https://www.oceanacidification.ca/" target="_blank"
                                 rel="noopener noreferrer"
                                 class="text-primary font-bold hover:underline underline-offset-3">Canada's Ocean Acidification
                                 Community of Practice</a> to discover our species impacts, action plans, Canada's expert
@@ -44,7 +45,8 @@
                         </div>
                         <div class="text-muted pl-4 pr-4" style="line-height: 1.6;">
                             The Ocean Environmental Conditions Observer app is developed and maintained by the Canadian Integrated Ocean Observing System 
-                            (<a href="https://www.cioospacific.ca/" target="_blank" rel="noopener noreferrer"
+                            (<a
+href="https://www.cioospacific.ca/" target="_blank" rel="noopener noreferrer"
                                 class="text-primary font-bold hover:underline underline-offset-3">CIOOS</a>)
                             Pacific regional association. OceanECO is designed to be a supporting tool for the "British Columbia Ocean Acidification and Hypoxia Action Plan" and "MEOPAR Ocean Acidification Community of Practice" partners. Data access is made possible by our data partners, which include Ocean Networks Canada, Hakai Institute, Fisheries and Oceans Canada, the University of British Columbia, and the University of Washington.
                         </div>
@@ -92,11 +94,11 @@
                             <div class="border border-accented rounded-lg overflow-x-auto">
                                 <table class="w-full min-w-[900px] table-fixed border-collapse text-sm text-left">
                                     <colgroup>
-                                        <col class="w-[25%]" />
-                                        <col class="w-[23%]" />
-                                        <col class="w-[14%]" />
-                                        <col class="w-[8%]" />
-                                        <col class="w-[30%]" />
+                                        <col class="w-[25%]" >
+                                        <col class="w-[23%]" >
+                                        <col class="w-[14%]" >
+                                        <col class="w-[8%]" >
+                                        <col class="w-[30%]" >
                                     </colgroup>
                                     <thead class="bg-accented/40 text-xs uppercase tracking-wide text-muted">
                                         <tr>
@@ -113,13 +115,14 @@
                                                 <div class="font-semibold text-highlighted">{{ sensor.id }}</div>
                                                 <div v-if="sensor.note" class="text-muted mt-1">
                                                     {{ sensor.note }}</div>
-                                                <UBadge size="sm" color="error" variant="solid" class="mt-2 font-bold rounded-full" v-if="sensor.decommissioned">
+                                                <UBadge v-if="sensor.decommissioned" size="sm" color="error" variant="solid" class="mt-2 font-bold rounded-full">
                                                     <UIcon name="i-mdi-alert-circle" class="size-[14px]" start />
                                                     Decommissioned
                                                 </UBadge>
                                             </td>
                                             <td class="px-4 py-3">
-                                                <a :href="sensor.dataUrl" target="_blank" rel="noopener noreferrer"
+                                                <a
+:href="sensor.dataUrl" target="_blank" rel="noopener noreferrer"
                                                     class="text-primary hover:underline underline-offset-3">{{ orgHead(sensor.organization) }}<span
                                                         class="whitespace-nowrap">{{ orgTail(sensor.organization) }}<UIcon
                                                         name="i-mdi-open-in-new" class="size-3.5 ml-1 align-[-2px] opacity-70" /></span></a>

@@ -12,9 +12,10 @@
     </div>
 
     <div class="swatch-grid">
-      <button v-for="base in filteredBases" :key="base" type="button" class="swatch-cell"
+      <button
+v-for="base in filteredBases" :key="base" type="button" class="swatch-cell"
         :class="{ 'swatch-cell--selected': base === selectedBase }" :title="base" @click="selectBase(base)">
-        <div class="swatch-preview" :style="swatchStyle(base)"></div>
+        <div class="swatch-preview" :style="swatchStyle(base)"/>
         <span class="swatch-name">{{ base }}</span>
       </button>
       <div v-if="filteredBases.length === 0" class="swatch-empty">No palettes match "{{ paletteSearch }}"</div>

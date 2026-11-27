@@ -12,8 +12,6 @@
       <!-- <Layers @toggleLayer="onToggleLayer" /> -->
 
       <Overlays
-        @show-how="showHow = true"
-        @autorange="autorange"
         class="overlay"
         :style="{
           top: `${overlayGap}px`,
@@ -22,6 +20,8 @@
               ? mainStore.controlPanel_width + overlayGap
               : overlayGap) + 'px',
         }"
+        @show-how="showHow = true"
+        @autorange="autorange"
       />
 
       <ColorbarSettings
@@ -139,8 +139,8 @@
 
       <!-- Cursor readout (coordinates and/or model value), follows the mouse over the map -->
       <div
-        class="cursor-coord-label"
         v-if="mouseCoords.visible && (mainStore.showCursorCoords || cursorValueText)"
+        class="cursor-coord-label"
         :style="{ left: mouseCoords.x + 'px', top: mouseCoords.y + 'px' }"
       >
         <div v-if="cursorValueText" class="cursor-value">{{ cursorValueText }}</div>
@@ -160,7 +160,7 @@
         title="Drag to resize"
         @pointerdown="startFooterResize"
       >
-        <div class="footer-resize-grip"></div>
+        <div class="footer-resize-grip"/>
       </div>
       <div class="flex footer-content" style="width: 100%">
         <!-- Content area. Both panes stay mounted (like the fullscreen

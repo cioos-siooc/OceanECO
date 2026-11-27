@@ -6,7 +6,8 @@
   <UButton variant="outline" color="neutral" class="size-[24px] p-0 justify-center shrink-0" :title="'Jump to date'"><UIcon name="i-mdi-calendar" class="size-[14px]" /></UButton>
   <template #content>
     <div class="bg-elevated rounded-lg">
-              <UCalendar v-model="pickedCalendarDate" :min-value="minCalendarDate" :max-value="maxCalendarDate"
+              <UCalendar
+v-model="pickedCalendarDate" :min-value="minCalendarDate" :max-value="maxCalendarDate"
                 :is-date-disabled="isCalendarDateDisabled" />
               <div class="flex items-center gap-2 px-2 py-2">
                 <div class="grow" />
@@ -22,8 +23,8 @@
 
     <UButton variant="outline" color="neutral" class="size-[24px] p-0 justify-center shrink-0" :title="`Back one ${unitLabel}`" @click="stepBackward"><UIcon name="i-mdi-skip-previous" class="size-[14px]" /></UButton>
     <UButton variant="outline" color="neutral" class="size-[24px] p-0 justify-center shrink-0" :title="playing ? 'Pause' : 'Play'" @click="togglePlay">
-      <UIcon name="i-mdi-play" class="size-[14px]" v-if="!playing" />
-      <UIcon name="i-mdi-pause" class="size-[14px]" v-else />
+      <UIcon v-if="!playing" name="i-mdi-play" class="size-[14px]" />
+      <UIcon v-else name="i-mdi-pause" class="size-[14px]" />
     </UButton>
     <UButton variant="outline" color="neutral" class="size-[24px] p-0 justify-center shrink-0" :title="`Forward one ${unitLabel}`" @click="stepForward"><UIcon name="i-mdi-skip-next" class="size-[14px]" /></UButton>
 
@@ -33,8 +34,9 @@
   <UButton variant="outline" color="neutral" class="size-[24px] p-0 justify-center shrink-0" :title="`Speed: x${speed}`"><UIcon name="i-mdi-speedometer" class="size-[14px]" /></UButton>
   <template #content>
     <div class="py-1">
-            <div v-for="s in speeds" :key="s" role="button" tabindex="0" @click="setSpeed(s)"
-              class="px-3 py-1 text-sm cursor-pointer hover:bg-elevated">
+            <div
+v-for="s in speeds" :key="s" role="button" tabindex="0" class="px-3 py-1 text-sm cursor-pointer hover:bg-elevated"
+              @click="setSpeed(s)">
               {{ s }}x
             </div>
           </div>

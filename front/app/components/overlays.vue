@@ -6,7 +6,8 @@
     <div class="tb__row">
       <span class="tb__cap">Panel</span>
       <UTooltip text="Show or hide the left panel" :content="{ side: 'right' }">
-        <button type="button" class="tb__btn" :class="{ 'tb__btn--on': isControlPanelOpen }"
+        <button
+type="button" class="tb__btn" :class="{ 'tb__btn--on': isControlPanelOpen }"
           aria-label="Left panel" :aria-pressed="isControlPanelOpen" @click="mainStore.toggleIsControlPanelOpen">
           <UIcon name="i-mdi-dock-left" class="size-[15px]" />
         </button>
@@ -41,7 +42,8 @@
         </button>
       </UTooltip>
       <UTooltip text="Colour settings" :content="{ side: 'bottom' }">
-        <button type="button" class="tb__btn" :class="{ 'tb__btn--on': showColorbarSettings }" aria-label="Colour settings"
+        <button
+type="button" class="tb__btn" :class="{ 'tb__btn--on': showColorbarSettings }" aria-label="Colour settings"
           :aria-pressed="showColorbarSettings" @click="showColorbarSettings = !showColorbarSettings">
           <UIcon name="i-mdi-tune-variant" class="size-[15px]" />
         </button>
