@@ -399,6 +399,8 @@ function plot(modelData: any, climateData: any, sensorData: any | null, instrume
     }
 
     const option: any = {
+        // New data replaces the old in one frame, when the loading spinner clears; a tween reads as a late update.
+        animation: false,
         graphic: [{
             type: 'text',
             right: 10,

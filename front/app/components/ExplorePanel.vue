@@ -19,7 +19,7 @@
         />
         <!-- Which sub-view (Timeseries / Model depth / Sensor depth) is showing
              is picked from the footer's nav rail now, not a toggle in here. -->
-        <UIcon name="i-mdi-loading" class="animate-spin size-[14px] text-teal-400" v-if="loading" />
+        <UIcon name="i-mdi-loading" class="animate-spin size-[14px] text-teal-400" v-if="busy" />
 
         <div class="grow" />
 
@@ -112,10 +112,10 @@
             :grid-left="AXIS_LEFT_PX" :grid-right="DATAZOOM_RIGHT_PX" legend-layout="top" :bin-mode="binMode" />
           <!-- Out-of-domain already has the alert above; repeating it across the
                plot labels a chart that is drawing real sensor data as empty. -->
-          <div v-if="!depthHasData && !loading && !outOfDomain" class="line-empty">{{ emptyLineMessage }}</div>
+          <div v-if="!depthHasData && !busy && !outOfDomain" class="line-empty">{{ emptyLineMessage }}</div>
         </div>
 
-        <div v-if="loading" class="loading-overlay">
+        <div v-if="busy" class="loading-overlay">
           <UIcon name="i-mdi-loading" class="animate-spin size-[42px] text-teal-400" />
         </div>
       </div>
@@ -326,6 +326,10 @@ watch(windowEnd, (d) => mainStore.setExploreWindowEnd(d.getTime()), { immediate:
 const grid = ref<(number | null)[][]>([])
 const sensorGrid = ref<(number | null)[][] | null>(null)
 const loading = ref(false)
+// The line chart plots model + sensor + climatology in one go; the spinner covers all three.
+const sensorLoading = ref(false)
+const climLoading = ref(false)
+const busy = computed(() => loading.value || (viewMode.value === 'series' && (sensorLoading.value || climLoading.value)))
 const loadError = ref<string | null>(null)
 
 /**
@@ -488,6 +492,9 @@ function toSensorApiDate(d: Date) {
 let sensorFetchSeq = 0
 
 async function fetchSensorOverlay() {
+  // Bumped before the early returns too, so an older in-flight request can't land after a deselect.
+  const reqId = ++sensorFetchSeq
+  sensorLoading.value = false
   const sel = mainStore.selectedSensor
   const meta = sel?.id ? mainStore.sensors.find(s => s.id === sel.id) : null
   if (!sel?.id || !meta) { sensorSeries.value = null; instrumentSeries.value = null; return }
@@ -503,7 +510,6 @@ async function fetchSensorOverlay() {
   // for, silently mislabelling every point if the window moved meanwhile.
   // Runs to `chartWindowEnd`, not `windowEnd`: at the live edge the model's
   // ceiling lags real time by days, and the sensor keeps reporting past it.
-  const reqId = ++sensorFetchSeq
   const mode = binMode.value
   const end = chartWindowEnd.value
   const starts = [...binStarts.value]
@@ -523,6 +529,7 @@ async function fetchSensorOverlay() {
   )
   const compared = compareInstruments.value && canCompareInstruments.value ? instruments.value : []
 
+  sensorLoading.value = true
   try {
     const [merged, ...each] = await Promise.all([
       fetchOne(null),
@@ -537,6 +544,8 @@ async function fetchSensorOverlay() {
   } catch {
     // overlay is supplementary; never blank the model line for it
     if (reqId === sensorFetchSeq) { sensorSeries.value = null; instrumentSeries.value = null }
+  } finally {
+    if (reqId === sensorFetchSeq) sensorLoading.value = false
   }
 }
 
@@ -949,6 +958,9 @@ async function updateLineChart() {
   // (its `v-if` unmounts the component), but guard on viewMode directly too so
   // an in-flight call from just before the switch doesn't race the teardown.
   if (!lineChart.value || viewMode.value !== 'series') return
+  // A model or sensor fetch still in flight calls back here when it lands; plotting now
+  // would draw one source a beat before the others.
+  if (loading.value || sensorLoading.value) return
   // Calls overlap (window change, then its fetch landing) and each awaits the
   // climate fetch; without this a slower, older call plots last — the previous
   // window's values on the new window's axis (seen when opening a share link).
@@ -961,6 +973,7 @@ async function updateLineChart() {
 
   let clim: any = null
   if (point.value && depths.value[d] != null) {
+    climLoading.value = true
     try {
       // Pad a day on each side: the API places each calendar day's point at
       // noon UTC (extract_climate_timeseries.py), but the chart's axis bounds
@@ -981,7 +994,10 @@ async function updateLineChart() {
     } catch {
       clim = null  // envelope is supplementary; a failure must not blank the model line
     }
+    if (seq === lineSeq) climLoading.value = false
   }
+  // A fetch started while the climatology was loading will call back here with fresh data.
+  if (loading.value || sensorLoading.value) return
 
   const sensor = sensorSeries.value?.time.length
     ? { ...sensorSeries.value, depth: depths.value[d] }
