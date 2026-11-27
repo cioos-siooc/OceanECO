@@ -206,65 +206,40 @@ import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue';
 import { useRuntimeConfig } from '#app';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import axios from 'axios'
 import moment from 'moment-timezone'
 import SelectedVariableDrawer from '../components/SelectedVariableDrawer.vue'
 import BetaDisclaimerDialog from '../components/BetaDisclaimerDialog.vue'
-import type { FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
-import { resolveColormap, packedRasterPaint } from '~~/composables/useColormapResolver'
-import { MAP_BOUNDS, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_STYLE } from '@/config/app'
-import { applyBasemapPaint, addSatelliteLayer, setSatelliteVisibility, raiseWaterNamesLayer, setMapLabelsVisibility, applyBathymetryContours } from '~~/composables/useBasemap'
-import { utc2pst } from '~~/composables/useUTC2PST'
-import useStationsInteraction from '~~/composables/useStationsInteraction';
-import { haversineM } from '@/utils/sensorMerge';
-import { addCastLayer, setCastLayerVisibility, setSelectedCast, CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
-import { addGliderLayer, setGliderTracks, setGliderPins, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
-import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, setAreaVolume, cameraForAreaVolume, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
-import { hexToRgb } from '~~/composables/useFieldColorRamp';
-import { chart } from '@/config/palette';
-import { fetchSeafloorGrid } from '~~/composables/useSeafloorGrid';
-import { fetchGliderSection, sectionInPeriod } from '~~/composables/useGliderSectionFetch';
-import { isoDay, matchesTime } from '@/utils/obsFilter';
-import { useFieldColorRamp } from '~~/composables/useFieldColorRamp';
-import { addBuoyLayer, setBuoyLayerVisibility, setSelectedBuoy, setHoveredBuoy, SOURCE_ID, STATIONS_LAYER_ID, type MultiSensorCandidate } from '~~/composables/useBuoyLayer';
-import getSensorTimeseries from '~~/composables/useSensorTimeseries';
 import AnalysisWorkspace from '../components/AnalysisWorkspace.vue'
 import ExplorePanel from '../components/ExplorePanel.vue'
 import ComparisonWorkspace from '../components/ComparisonWorkspace.vue'
 import CrossSectionPanel from '../components/crossSection/CrossSectionPanel.vue'
 import AreaPanel from '../components/area/AreaPanel.vue'
-import { useObsAreaLayer, circleRing } from '~~/composables/useObsAreaLayer'
 import PointSnapshot from '../components/snapshot/PointSnapshot.vue'
-import SegmentedControl from '../components/ui/SegmentedControl.vue'
-
-///////////////////////////////////  SETUP  ///////////////////////////////////
-
-import { useMainStore, type BottomTab, type GliderDeployment, type Sensor, type ShipCast } from '../stores/main'
+import { MAP_BOUNDS, MAP_MIN_ZOOM, MAP_MAX_ZOOM, MAP_STYLE } from '@/config/app'
+import { useMainStore, type BottomTab } from '../stores/main'
 import { trackEvent } from '~~/composables/useAnalytics'
 import { useRasterProbe } from '~~/composables/useRasterProbe'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
-
-const queryModeItems = [
-    { value: 'point', label: 'Point', icon: 'i-mdi-map-marker', title: 'Point query' },
-    { value: 'area', label: 'Area', icon: 'i-mdi-vector-square', title: 'Area query' },
-]
+import { CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
+import { GLIDER_CLICK_LAYERS } from '~~/composables/useGliderLayer';
+// The map's layers, each driven off the store (this page only creates the map and routes clicks).
+import { applyBasemapPaint, addSatelliteLayer, setSatelliteVisibility, raiseWaterNamesLayer, setMapLabelsVisibility, applyBathymetryContours } from '~~/composables/useBasemap'
+import { useModelRasterLayer } from '~~/composables/useModelRasterLayer'
+import { useSensorMap } from '~~/composables/useSensorMap'
+import { useGliderMap } from '~~/composables/useGliderMap'
+import { useCastMap } from '~~/composables/useCastMap'
+import { useMapDrawTools } from '~~/composables/useMapDrawTools'
 
 const mainStore = useMainStore();
 
 const config = useRuntimeConfig();
 const apiBaseUrl = config.public.apiBaseUrl
 
-// Colormaps cache
-// const colormaps = ref<Record<string, any>>({});
-
-
-
 const mapContainer = ref<HTMLDivElement | null>(null);
 let map: mapboxgl.Map | null = null;
-let crossSectionDraw: MapboxDraw | null = null;
-const meta = ref<any>(null);
+const getMap = () => map;
 const drawerOpen = computed({
     get: () => mainStore.isVerticalProfileOpen,
     set: (v: boolean) => mainStore.setIsVerticalProfileOpen(v),
@@ -346,20 +321,6 @@ function startFooterResize(e: PointerEvent) {
     window.addEventListener('pointerup', onUp);
 }
 
-const sensorPicker = ref<{ visible: boolean; x: number; y: number; sensors: MultiSensorCandidate[] }>({
-    visible: false,
-    x: 0,
-    y: 0,
-    sensors: [],
-});
-
-const spiderfy = ref<{
-    visible: boolean;
-    centerX: number;
-    centerY: number;
-    spokes: Array<{ label: string; dot: string; ring?: string; line: string; pick: () => void; x: number; y: number }>;
-}>({ visible: false, centerX: 0, centerY: 0, spokes: [] });
-
 // [-126.4002914428711, 46.85966491699218, -121.31835174560548, 51.10480117797852]
 const bounds = MAP_BOUNDS;
 
@@ -369,8 +330,10 @@ const mouseCoords = ref<{ lng: number | null, lat: number | null, x: number, y: 
 // and read it under the mouse. Only fetched/decoded while the toggle is on.
 const rasterProbe = useRasterProbe();
 const { formatDisplayValue, toDisplayValue } = useVariableRegistry();
-// Set by updatePngOverlay — the image currently on the model layer.
-const probeImage = ref<{ url: string, varName: string, precision: number, bounds: [number, number, number, number] } | null>(null);
+const {
+    probeImage, updatePngOverlay, removePngOverlay, addBathymetryTilesLayer, removeBathymetryTilesLayer,
+    onPngSourceSettled, clearMapLoadTimers,
+} = useModelRasterLayer(getMap, apiBaseUrl, onMapClick, () => mapLoaded.value);
 
 watch([probeImage, () => mainStore.showCursorValue], ([img, on]) => {
     if (!on || !img) return rasterProbe.clear();
@@ -388,20 +351,11 @@ const cursorValueText = computed(() => {
     return formatDisplayValue(img.varName, toDisplayValue(img.varName, v), { unit: true });
 });
 
-const sensorData = ref<{ time: string, value: number }[]>([])
-
-// Dialog for detailed timeseries
-const dialogOpen = ref(false);
-
 // Flags to coordinate initial click: mapLoaded becomes true when map 'load' fires;
 // selectedReady becomes true when initial variables/selectedVariable are set.
 const mapLoaded = ref(false);
 const selectedReady = ref(false);
 let didInitClick = false;
-
-/**
- * Number of days from now to fetch for climate timeseries. This is used both for the API request parameter and for computing the x-axis range of the chart (now +/- DFN days). The API will return all available data within that range, which may be less than DFN if the model run does not extend that far into the future.
-*/
 
 const zoom = ref('');
 
@@ -416,11 +370,6 @@ watch(() => mainStore.snackMessages.length, (n) => {
     }
 });
 
-const snackMessages = computed({
-    get: () => mainStore.snackMessages,
-    set: (val) => { mainStore.snackMessages = val; },
-});
-
 const showHow = ref(false);
 
 // Keeps the style's water-name labels on top of whatever was added since (see raiseWaterNamesLayer).
@@ -430,24 +379,7 @@ const overlayGap = 8; // gap in px between map edge and overlays (info, colorbar
 
 ///////////////////////////////////  COMPUTED  ///////////////////////////////////
 
-const DFN = computed(() => mainStore.dfnDays);
-
-const selectedVariable = computed(() => mainStore.selected_variable);
-
-const showBathymetryContours = computed(() => mainStore.showBathymetryContours);
-
 const lastClicked = computed(() => mainStore.lastClickedMapPoint);
-
-const selectedColormap = computed(() => {
-    const name = mainStore.selected_variable.colormap;
-    if (name) return resolveColormap(mainStore.colormaps, name);
-    // Fallback to a default colormap (DB doesn't store colormap field)
-    return null;
-});
-
-const midDate = computed(() => {
-    return mainStore.midDate ?? moment.utc();
-});
 
 const mapCenter = computed(() => mainStore.mapCenter);
 
@@ -523,36 +455,13 @@ onMounted(async () => {
         publishMapView();
 
         applyPendingMapView();
-        restoreSharedCrossSection();
         // A share link sets these before the style has loaded, when their watchers can't add layers yet.
         if (mainStore.showBathymetryContours) applyBathymetryContours(map, true, apiBaseUrl);
         if (mainStore.showMapLabels) setMapLabelsVisibility(map, true);
         if (mainStore.showSatellite) setSatelliteVisibility(map, true);
 
-        updateAnalysisBox();
-
-        // Cross-Section tab's line-drawing control. Added once and left on the
-        // map permanently (mode is toggled by the activeTab watcher below)
-        // rather than added/removed per tab switch — mapbox-gl-draw's own
-        // draw_line_string mode already handles double-click-zoom
-        // suspension and Enter/Escape-to-finish, so there's nothing else to
-        // hand-roll here.
-        crossSectionDraw = new MapboxDraw({ displayControlsDefault: false, controls: {} });
-        map?.addControl(crossSectionDraw);
-        map?.on('draw.create', onCrossSectionDrawChange);
-        map?.on('draw.update', onCrossSectionDrawChange);
-        map?.on('draw.delete', () => mainStore.setCrossSectionLine(null));
-
-        if (map) {
-            areaLayer = useObsAreaLayer(map, (c) => mainStore.setObsArea({
-                ...c,
-                depthMin: mainStore.obsArea?.depthMin ?? AREA_DEFAULT_DEPTH[0],
-                depthMax: mainStore.obsArea?.depthMax ?? AREA_DEFAULT_DEPTH[1],
-            }));
-            syncAreaLayer();
-            updateAreaVolume();
-            if (areaBbox()) updateGliderSeafloor();
-        }
+        attachDrawTools();
+        if (map && areaBbox()) updateGliderSeafloor();
     });
 
 
@@ -566,57 +475,23 @@ onBeforeUnmount(() => {
         map.off('sourcedata', onPngSourceSettled);
         map.off('error', onPngSourceSettled);
         map.off('moveend', publishMapView);
-
-        const handlers = (map as any)?.__anchoredChartsHandlers;
-        const refs = (map as any)?.__anchoredCharts as Array<any> | undefined;
-        const svg = (map as any)?.__anchoredChartsSvg as SVGElement | undefined;
-        const globalHandlers = (map as any)?.__globalChartHandlers;
-
-        if (handlers) {
-            map.off('move', handlers.updateAll);
-            map.off('zoom', handlers.updateAll);
-            map.off('rotate', handlers.updateAll);
-            map.off('pitch', handlers.updateAll);
-            map.off('resize', handlers.resizeHandler);
-            window.removeEventListener('resize', handlers.updateAll);
-        }
-
-        if (globalHandlers) {
-            map.off('resize', globalHandlers.resizeHandler);
-            try { window.removeEventListener('resize', globalHandlers.resizeHandler); } catch (e) { }
-            try { if (globalHandlers.onStationEnter) map.off('mouseenter', 'stations-circles', globalHandlers.onStationEnter); } catch (e) { }
-            try { if (globalHandlers.onStationLeave) map.off('mouseleave', 'stations-circles', globalHandlers.onStationLeave); } catch (e) { }
-        }
         // detach station handlers if attached
         try { const sd = (map as any).__stationsDetach; if (sd) sd(); } catch (e) { }
-        _castsDetach?.();
-        _castsDetach = null;
+        detachCasts();
 
         // remove png overlay if present
         try { if (map.getLayer && map.getLayer('png-image-layer')) map.removeLayer('png-image-layer'); } catch (e) { }
         try { if (map.getSource && map.getSource('png-image')) map.removeSource('png-image'); } catch (e) { }
         try { const ov = (map as any).__activePngOverlay; if (ov && ov.clickHandler) map.off('click', ov.clickHandler); } catch (e) { }
         try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
-        if (refs) {
-            for (const r of refs) {
-                try { r.chart.dispose(); } catch { }
-                try { r.chartMarker.remove(); } catch { }
-                try { r.dotMarker.remove(); } catch { }
-                try { if (r.line && r.line.parentNode) r.line.parentNode.removeChild(r.line); } catch { }
-            }
-        }
 
-        // remove analysis region box
-        try { if (map.getLayer(ABOX_FILL)) map.removeLayer(ABOX_FILL); } catch (e) { }
-        try { if (map.getLayer(ABOX_LINE)) map.removeLayer(ABOX_LINE); } catch (e) { }
-        try { if (map.getSource(ABOX_SOURCE)) map.removeSource(ABOX_SOURCE); } catch (e) { }
+        detachDrawTools();
 
         // remove stations layers + source if present
         try { if (map.getLayer && map.getLayer('stations-badge')) map.removeLayer('stations-badge'); } catch (e) { }
         try { if (map.getLayer && map.getLayer('stations-circles')) map.removeLayer('stations-circles'); } catch (e) { }
         try { if (map.getSource && map.getSource('stations-points')) map.removeSource('stations-points'); } catch (e) { }
 
-        if (svg && svg.parentNode) svg.parentNode.removeChild(svg);
         map.remove();
     }
 
@@ -680,27 +555,6 @@ watch(() => mainStore.exploreBinMode, async () => {
 
 watch(() => mainStore.showBathymetryContours, (show) => applyBathymetryContours(map, show, apiBaseUrl));
 
-// Overlay rail: hide/show the model raster tiles. Purely a map concern — the
-// selected variable/depth keep driving the charts either way.
-watch(() => mainStore.showModelLayer, (visible: boolean) => {
-    try {
-        if (map?.getLayer('png-image-layer')) {
-            map.setLayoutProperty('png-image-layer', 'visibility', visible ? 'visible' : 'none');
-        }
-    } catch (e) {
-        console.warn('Failed to toggle model layer visibility:', e);
-    }
-});
-
-// Overlay rail: hide/show the buoy symbols (and their badges).
-watch(() => mainStore.showSensorLayer, (visible: boolean) => {
-    try {
-        setBuoyLayerVisibility(map, visible);
-    } catch (e) {
-        console.warn('Failed to toggle sensor layer visibility:', e);
-    }
-});
-
 watch(() => mainStore.showMapLabels, (visible: boolean) => {
     try {
         setMapLabelsVisibility(map, visible);
@@ -722,30 +576,6 @@ watch(() => mainStore.lastClickedMapPoint, (point) => {
     trigger_mapClick(point.lat, point.lng);
 }, { immediate: true });
 
-// When colormap, min, or max change in store, update overlay
-watch([
-    () => mainStore.selected_variable.colormap,
-    () => mainStore.selected_variable.colormapMin,
-    () => mainStore.selected_variable.colormapMax
-], async () => {
-    if (!map || !mapLoaded.value) return;
-    if (mainStore.selected_variable.var === 'bathymetry') {
-        updateBathymetryTilesLayerColorization();
-    } else if (map.getLayer('png-image-layer')) {
-        // Same image, new colours: repaint only. Reloading the image on every slider tick made
-        // range drags stutter.
-        const paint = pngRasterPaint();
-        map.setPaintProperty('png-image-layer', 'raster-color', paint.color);
-        map.setPaintProperty('png-image-layer', 'raster-color-range', paint.range);
-    } else {
-        try {
-            await updatePngOverlay();
-        } catch (e) {
-            console.warn('Failed to update overlay after colormap/min/max change', e);
-        }
-    }
-}, { immediate: false });
-
 // Handler for time controls component
 // function onTimeControlDt(dt: any) {
 //     // dt is a moment object (UTC)
@@ -758,18 +588,6 @@ watch(() => mapCenter.value, (newCenter) => {
 }, { immediate: true })
 
 ///////////////////////////////////  MEDTHODS  ///////////////////////////////////
-async function getMetadata() {
-    try {
-        const varName = mainStore.selected_variable.var;
-        const metaPath = `${apiBaseUrl}/metadata/${varName}`;
-
-        const r = await axios.get(metaPath);
-        meta.value = JSON.parse(r.data);
-    } catch (e) {
-        console.error('Failed to fetch metadata:', e);
-    }
-}
-
 async function init() {
     if (!map) return;
 
@@ -808,39 +626,6 @@ function applyPendingMapView() {
     publishMapView();
 }
 watch(() => mainStore.pendingMapView, () => { if (mapLoaded.value || map) applyPendingMapView(); });
-
-/**
- * Put a shared cross-section line back on the map. `mainStore.crossSectionLine`
- * alone only feeds the panel's fetch — the line itself lives in
- * mapbox-gl-draw's own store, which starts empty on a fresh load, so the
- * geometry has to be handed back to it explicitly.
- */
-let crossSectionRestored = false;
-function restoreSharedCrossSection() {
-    if (!crossSectionDraw || crossSectionRestored) return;
-    const line = mainStore.crossSectionLine;
-    if (line?.length) {
-        crossSectionRestored = true;
-        crossSectionDraw.add({
-            type: 'Feature',
-            properties: {},
-            geometry: { type: 'LineString', coordinates: line.map(p => [p.lng, p.lat]) },
-        } as GeoJSON.Feature<GeoJSON.LineString>);
-        updateCrossSectionVertexLabels();
-    } else if (!mainStore.shareRestorePending) {
-        // No line to put back (and none still arriving). Arm drawing if the
-        // app opened straight into this tab — the activeTab watcher only fires
-        // on a *change* of tab, so a shared link that lands here never triggers it.
-        crossSectionRestored = true;
-        if (activeTab.value === 'crossSection') crossSectionDraw.changeMode('draw_line_string');
-    }
-}
-// The payload finishes decoding after the map is built, so the line can arrive
-// later than `map.on('load')` — retry once it does (the flag above makes this
-// idempotent, and leaves the user's own subsequent drawing alone).
-watch([() => mainStore.shareRestorePending, () => mainStore.crossSectionLine], () => {
-    if (mapLoaded.value || map) restoreSharedCrossSection();
-});
 
 function maybeInitClick() {
     // Call initClick only once both the map has finished loading and the selected variable has been initialized
@@ -885,612 +670,46 @@ function initClick(lat: number, lng: number) {
 // own model/sensor pair. This page's remaining job around a click is to place
 // the marker and publish the coordinate on the store.
 
-const REALTIME_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
-const PROXIMITY_M = 100; // sensors within 100 m share one map marker
+const { sensorPicker, spiderfy, addSensors, clickSensor, openCastSpiderfy } = useSensorMap(getMap, apiBaseUrl);
+const { addGliders, updateGliderSeafloor, areaBbox } = useGliderMap(getMap, apiBaseUrl);
+const { attachDrawTools, detachDrawTools } = useMapDrawTools(getMap, trigger_mapClick, () => mapLoaded.value);
+const { addCasts, detach: detachCasts } = useCastMap(getMap, apiBaseUrl, openCastSpiderfy);
 
-/**
- * Sensors sharing a map marker. The radius grows with the merge tolerance:
- * a site's merged depths are each centred on their own members, so at a wide
- * tolerance they can sit further apart than 100 m and would otherwise stack
- * as separate, overlapping markers.
- */
-function groupSensors(sensors: Sensor[]): Sensor[][] {
-    const radius = Math.max(PROXIMITY_M, mainStore.sensorMerge.distanceM);
-    const groups: Sensor[][] = [];
-    for (const s of sensors) {
-        const existing = groups.find(g =>
-            haversineM(g[0].latitude, g[0].longitude, s.latitude, s.longitude) < radius
-        );
-        if (existing) existing.push(s);
-        else groups.push([s]);
-    }
-    return groups;
-}
-
-let _sensorGroups: any[][] = [];
-let _groupedFrom: Sensor[] | null = null; // the mainStore.sensors list _sensorGroups was built from
-let _sensorIsRealtime: (s: any) => boolean = () => false;
-let _visibleSensorGroups: any[][] = []; // _sensorGroups filtered to mainStore.filteredSensors
-
-function coordKey(lat: number, lon: number): string {
-    return `${lat.toFixed(6)},${lon.toFixed(6)}`;
-}
-
-function buildSensorGeoJSON(groups: any[][], sensorIsRealtime: (s: any) => boolean): FeatureCollection<Geometry, GeoJsonProperties> {
-    const features = groups.map(group => {
-        const first = group[0];
-        const anyActive = group.some((s: any) => s.active);
-        const isRealtime = group.some(sensorIsRealtime);
-        const allRealtime = group.every(sensorIsRealtime);
-        const hasMixed = group.length > 1 && isRealtime && !allRealtime;
-        return {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [first.longitude, first.latitude] },
-            properties: {
-                coordKey: coordKey(first.latitude, first.longitude),
-                // "|id1|id2|" so the selection layer can match one sensor by substring.
-                sensorIds: `|${group.map((s: any) => s.id).join('|')}|`,
-                sensorCount: group.length,
-                active: anyActive,
-                isRealtime,
-                hasMixed,
-                isVariableDepth: group.some((s: any) => s.depth < 0),
-                sensorsJson: JSON.stringify(
-                    group.map((s: any) => ({
-                        id: s.id,
-                        name: s.name,
-                        depth: s.depth,
-                        depth_min: s.depth_min ?? null,
-                        depth_max: s.depth_max ?? null,
-                        isRealtime: sensorIsRealtime(s),
-                        lat: s.latitude,
-                        lon: s.longitude,
-                    }))
-                ),
-            }
-        };
-    });
-    return { type: 'FeatureCollection', features };
-}
-
-function updateBuoyVarOpacity(selectedVar: string | null) {
-    if (!map || !_visibleSensorGroups.length) return;
-    const keysWithVar = _visibleSensorGroups
-        .filter(g => !selectedVar || g.some((s: any) => selectedVar in (s.variables ?? {})))
-        .map(g => coordKey(g[0].latitude, g[0].longitude));
-    const expr: any = (!selectedVar || keysWithVar.length === _visibleSensorGroups.length)
-        ? 0.95
-        : ['case', ['in', ['get', 'coordKey'], ['literal', keysWithVar]], 0.95, 0.2];
-    try { (map as any).setPaintProperty(STATIONS_LAYER_ID, 'icon-opacity', expr); } catch (_) { }
-}
-
-// Recomputes which station groups are visible on the map from mainStore.filteredSensors
-// (the same filter criteria — search/organization/variable — driving the sensorInfo.vue list),
-// and pushes the resulting geometry into the existing source via setData.
-// Each group is trimmed down to only its filter-matching members, so clusters that survive
-// the filter don't still expose non-matching sensors when spiderfied.
-function applyBuoyFilters() {
-    if (!map || !_groupedFrom) return;
-    // A merge-tolerance change rebuilds mainStore.sensors; regroup from it.
-    if (_groupedFrom !== mainStore.sensors) {
-        _sensorGroups = groupSensors(mainStore.sensors);
-        _groupedFrom = mainStore.sensors;
-    }
-    const filteredIds = new Set(mainStore.filteredSensors.map((s: any) => s.id));
-    _visibleSensorGroups = _sensorGroups
-        .map(g => g.filter((s: any) => filteredIds.has(s.id)))
-        .filter(g => g.length > 0);
-    const geojson = buildSensorGeoJSON(_visibleSensorGroups, _sensorIsRealtime);
-    const source = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
-    if (source) source.setData(geojson);
-    updateBuoyVarOpacity(mainStore.selected_variable?.var ?? null);
-}
-
-watch(() => mainStore.filteredSensors, applyBuoyFilters);
-
-async function addSensors() {
-    await getSensors();
-    const now = Date.now();
-
-    // The store's list, not the response: deployments are merged there.
-    const groups = groupSensors(mainStore.sensors);
-    _groupedFrom = mainStore.sensors;
-
-    const sensorIsRealtime = (s: any) =>
-        s.latest_data_at && (now - new Date(s.latest_data_at).getTime()) < REALTIME_THRESHOLD_MS;
-
-    _sensorGroups = groups;
-    _sensorIsRealtime = sensorIsRealtime;
-
-    const filteredIds = new Set(mainStore.filteredSensors.map((s: any) => s.id));
-    _visibleSensorGroups = groups
-        .map(g => g.filter((s: any) => filteredIds.has(s.id)))
-        .filter(g => g.length > 0);
-
-    const geojson = buildSensorGeoJSON(_visibleSensorGroups, sensorIsRealtime);
-
-    try {
-        const detach = await addBuoyLayer(map, geojson, clickSensor, openSensorPicker, openSpiderfy);
-        (map as any).__stationsDetach = detach;
-        setSelectedBuoy(map, mainStore.selectedSensor?.id ?? null);
-        setHoveredBuoy(map, mainStore.hoveredSensorId);
-        // addBuoyLayer re-creates the layers from scratch, so the rail's toggle
-        // has to be re-applied every time the sensor list changes.
-        setBuoyLayerVisibility(map, mainStore.showSensorLayer);
-    } catch (e) {
-        console.warn('Failed to add buoy layer:', e);
-    }
-
-    updateBuoyVarOpacity(mainStore.selected_variable?.var ?? null);
-}
-
-watch(() => mainStore.selected_variable.var, (newVar) => {
-    updateBuoyVarOpacity(newVar ?? null);
-});
-
-function openSensorPicker(sensors: MultiSensorCandidate[], screenX: number, screenY: number) {
-    openSpiderfy(sensors, screenX, screenY);
-}
-
-function openSpiderfy(sensors: MultiSensorCandidate[], screenX: number, screenY: number) {
-    showSpiderfy(sensors.map(s => ({
-        label: s.name,
-        dot: s.isRealtime ? '#5cc28a' : '#13161a',
-        line: s.isRealtime ? 'rgba(92,194,138,0.7)' : 'rgba(125,134,143,0.7)',
-        pick: () => clickSensor(s.id, s.depth),
-    })), screenX, screenY);
-}
-
-// Casts at one spot: drawn like their map dots, CTD filled and bottle a ring.
-function openCastSpiderfy(ids: string[], screenX: number, screenY: number) {
-    const casts = ids.map(id => mainStore.casts.find(c => c.id === id)).filter((c): c is ShipCast => !!c);
-    showSpiderfy(casts.map(c => ({
-        label: `${c.kind === 'bottle' ? 'Bottle' : 'CTD'} cast · to ${Math.round(c.maxDepth)} m`,
-        dot: c.kind === 'bottle' ? 'transparent' : chart.sensor,
-        ring: chart.sensor,
-        line: 'rgba(125,134,143,0.7)',
-        pick: () => mainStore.selectCast(c.id),
-    })), screenX, screenY);
-}
-
-function showSpiderfy(items: Array<Omit<typeof spiderfy.value.spokes[number], 'x' | 'y'>>, screenX: number, screenY: number) {
-    sensorPicker.value.visible = false;
-    const radius = 70;
-    const startAngle = -Math.PI / 2;
-    const spokes = items.map((item, i) => {
-        const angle = startAngle + (2 * Math.PI / items.length) * i;
-        return { ...item, x: screenX + radius * Math.cos(angle), y: screenY + radius * Math.sin(angle) };
-    });
-    spiderfy.value = { visible: true, centerX: screenX, centerY: screenY, spokes };
-    map.once('movestart', () => { spiderfy.value.visible = false; });
-}
-
-function clickSensor(sensor_id: string, depth: number) {
-    trackEvent('sensor_selected', { sensor_id, source: 'map' });
-    sensorPicker.value.visible = false;
-    mainStore.selectSensor(sensor_id, depth);
-    // Publishing the coordinate is the whole job — the panes fetch off the store.
-    // (No fetch to de-duplicate here any more, so the old _sensorClickPending
-    // guard against a double request from the var/depth watcher is gone too.)
-    const sensor = mainStore.sensors.find((s: any) => s.id === sensor_id);
-    if (sensor) {
-        mainStore.setLastClickedMapPoint({ lat: sensor.latitude, lng: sensor.longitude });
-    }
-}
-
-
-// Gliders and Argo floats share one layer; either list failing leaves the other.
-async function addGliders() {
-    const [gliders, argo] = await Promise.allSettled([
-        axios.get<Omit<GliderDeployment, 'kind'>[]>(`${apiBaseUrl}/gliders`),
-        axios.get<GliderDeployment[]>(`${apiBaseUrl}/argo`),
-    ]);
-    if (gliders.status === 'rejected') console.warn('gliders failed:', gliders.reason);
-    if (argo.status === 'rejected') console.warn('argo failed:', argo.reason);
-    mainStore.setGliders([
-        ...(gliders.status === 'fulfilled' ? gliders.value.data.map(g => ({ ...g, kind: 'glider' as const })) : []),
-        ...(argo.status === 'fulfilled' ? argo.value.data : []),
-    ]);
-    const detach = await addGliderLayer(map, mainStore.mapGliders, mainStore.gliderClips, (id) => {
-        mainStore.setSelectedSensor(null);
-        mainStore.selectGlider(id);
-    });
-    (map as any).__glidersDetach?.();
-    (map as any).__glidersDetach = detach;
-    setSelectedGlider(map, mainStore.selectedGliderId);
-    setGliderPins(map, mainStore.gliderPins, mainStore.gliderHover);
-    updateGliderCurtain();
-    updateGliderSeafloor();
-}
-
-// The observation period cuts every glider track to its matching stretches.
-watch(() => mainStore.gliderClips, (clips) => {
-    if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.mapGliders, clips);
-    updateGliderCurtain();
-});
-
-/** Whether the selected deployment's kind (glider or Argo) is on the map. */
-function selectedGliderShown(): boolean {
-    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
-    return g?.kind === 'argo' ? mainStore.showArgoLayer : mainStore.showGliderLayer;
-}
-
-// DFO IOS ship casts matching the observation period (mainStore.obsFilter),
-// re-fetched whenever it changes. Day/night needs the sun at each cast, so it
-// is applied here rather than by the API.
-async function addCasts() {
-    const r = await axios.get(`${apiBaseUrl}/casts/years`);
-    mainStore.setCastYears(r.data);
-    await loadCasts();
-}
-
-let _castsRequest = 0;
-let _castsDetach: (() => void) | null = null;
-async function loadCasts() {
+// A click on the map (not on a sensor, glider or cast, which handle their own)
+// picks that point; registered by the model layer (useModelRasterLayer).
+function onMapClick(evt: any) {
     if (!map) return;
-    const p = mainStore.obsResolved;
-    const req = ++_castsRequest;
-    const r = await axios.get(`${apiBaseUrl}/casts`, {
-        params: {
-            from: p.from != null ? isoDay(p.from) : undefined,
-            to: p.to != null ? isoDay(p.to) : undefined,
-            months: p.months?.join(','),
-            doy: p.doy?.center,
-            half: p.doy?.half,
-        },
-    });
-    if (req !== _castsRequest) return; // a newer period was picked meanwhile
-    const casts = p.diel === 'all' ? r.data.casts
-        : r.data.casts.filter((c: ShipCast) => matchesTime(p, Date.parse(c.time), c.lat, c.lon));
-    mainStore.setCasts({ ...r.data, casts, total: r.data.total - (r.data.casts.length - casts.length) });
-    const detach = addCastLayer(map, casts, (id) => mainStore.selectCast(id), openCastSpiderfy);
-    if (detach) _castsDetach = detach;
-    setSelectedCast(map, mainStore.selectedCastId);
-    setCastLayerVisibility(map, mainStore.showCastLayer);
-}
+    // While drawing a cross-section line, clicks add vertices via
+    // crossSectionDraw (see onCrossSectionDrawChange) — they aren't a
+    // point query, and must not clear the sensor selection mid-draw.
+    if (mainStore.activeBottomTab === 'crossSection' || mainStore.activeBottomTab === 'area') return;
 
-// Keyed on what the API is asked, so a map-date step only refetches when the
-// period follows it; debounced for playback and for dragging the year brush.
-let _castsTimer: ReturnType<typeof setTimeout> | null = null;
-watch(() => {
-    const p = mainStore.obsResolved;
-    return JSON.stringify([p.from, p.to, p.months, p.doy, p.diel]);
-}, () => {
-    if (_castsTimer) clearTimeout(_castsTimer);
-    _castsTimer = setTimeout(() => loadCasts().catch((e) => console.warn('loadCasts failed:', e)), 300);
-});
-watch(() => mainStore.selectedCastId, (id) => setSelectedCast(map, id));
-watch(() => mainStore.showCastLayer, (visible: boolean) => setCastLayerVisibility(map, visible));
+    const { lng, lat } = evt.lngLat;
 
-// The selected glider's section, hung under its track when the map is tilted:
-// the whole deployment, or the stretch its Explore section is zoomed to, which
-// the track highlights too.
-const { rgbFn: fieldRgbFn } = useFieldColorRamp();
-let curtainSeq = 0;
-let curtainBottomM = 1000; // deepest cell of the curtain on show, for framing it
-let curtainTrack: [number, number][] = []; // its columns' positions, for framing it
-async function updateGliderCurtain() {
-    const seq = ++curtainSeq;
-    const v = mainStore.selected_variable.var;
-    const range = mainStore.gliderRange;
-    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
-    if (!map || !g || !g.variables.includes(v)) {
-        setGliderCurtain(map, null);
-        setGliderRangeTrack(map, null);
-        curtainTrack = [];
+    // Check if click landed on a sensor feature (layer may not exist yet)
+    const stationLayers = map.getLayer('stations-circles') ? ['stations-circles'] : [];
+    const features = stationLayers.length
+        ? map.queryRenderedFeatures(evt.point, { layers: stationLayers })
+        : [];
+
+    // Glider tracks/heads are handled by useGliderLayer's own click handler.
+    const gliderLayers = GLIDER_CLICK_LAYERS.filter(id => map.getLayer(id));
+    if (gliderLayers.length && map.queryRenderedFeatures(evt.point, { layers: gliderLayers }).length) return;
+    // So are ship casts, by useCastLayer's.
+    const castLayers = CAST_CLICK_LAYERS.filter(id => map.getLayer(id));
+    if (castLayers.length && map.queryRenderedFeatures(evt.point, { layers: castLayers }).length) return;
+
+    if (features.length > 0) {
+        // Sensor click is fully handled by useStationsInteraction → clickSensor.
+        // Returning here prevents a duplicate getTimeseriesPromises call.
         return;
     }
-    try {
-        const s = sectionInPeriod(await fetchGliderSection(g.id, v, range), mainStore.obsResolved);
-        if (seq !== curtainSeq) return;
-        const deepest = s.values.findLastIndex(row => row.some(x => x != null));
-        if (deepest >= 0) curtainBottomM = s.depths[deepest]!;
-        curtainTrack = s.lon.map((lon, i) => [lon, s.lat[i]!]);
-        setGliderRangeTrack(map, range ? curtainTrack : null);
-        setGliderCurtain(map, {
-            lon: s.lon,
-            lat: s.lat,
-            depths: s.depths,
-            values: s.values.map(row => row.map(x => x == null ? null : toDisplayValue(v, x))),
-            rgb: fieldRgbFn.value,
-        }, GLIDER_BASE_LAYER);
-        setGliderCurtainVisibility(map, selectedGliderShown());
-    } catch (e) {
-        console.warn('glider curtain failed:', e);
-    }
-}
-// fieldRgbFn changes identity with the palette, range and display unit.
-watch([() => mainStore.selectedGliderId, () => mainStore.selected_variable.var, () => mainStore.gliderRange, fieldRgbFn], updateGliderCurtain);
 
-// The seafloor under the 3D views: around the Area tab's circle while that
-// tab is open, else around the selected glider's track — always the whole
-// deployment's area, so zooming the section doesn't reshape the terrain.
-let seafloorSeq = 0;
-let seafloorDeepestM = 0;
-function areaBbox(): [number, number, number, number] | null {
-    const a = mainStore.obsArea;
-    if (activeTab.value !== 'area' || !a) return null;
-    const ring = circleRing(a, 32);
-    const lons = ring.map(p => p[0]), lats = ring.map(p => p[1]);
-    return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
-}
-async function updateGliderSeafloor() {
-    const seq = ++seafloorSeq;
-    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
-    const bbox = areaBbox() ?? g?.bbox;
-    seafloorDeepestM = 0;
-    if (!map || !bbox) {
-        setGliderSeafloor(map, null);
-        return;
-    }
-    try {
-        const grid = await fetchSeafloorGrid(bbox);
-        if (seq !== seafloorSeq) return;
-        seafloorDeepestM = grid.depth.reduce((a, d) => (d > a ? d : a), 0);
-        setGliderSeafloor(map, grid, GLIDER_BASE_LAYER);
-        setGliderCurtainVisibility(map, selectedGliderShown());
-        setGliderSeafloorVisibility(map, mainStore.showSeafloor);
-    } catch (e) {
-        console.warn('glider seafloor failed:', e);
-    }
-}
-watch([() => mainStore.selectedGliderId, areaBbox], updateGliderSeafloor);
-watch(() => mainStore.showSeafloor, (v: boolean) => setGliderSeafloorVisibility(map, v));
-
-const GLIDER_TILT_PITCH = 60;
-
-/** Bearing that looks across the track's main axis, keeping north as near to up as possible. */
-function sideOnBearing(track: GliderDeployment['track']): number {
-    const k = Math.cos(track[0]![1] * Math.PI / 180);
-    const xs = track.map(p => p[0] * k);
-    const ys = track.map(p => p[1]);
-    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
-    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
-    let sxx = 0, syy = 0, sxy = 0;
-    xs.forEach((x, i) => {
-        const dx = x - mx, dy = ys[i]! - my;
-        sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
-    });
-    // Principal axis as an azimuth (clockwise from north); face 90° off it.
-    const azimuth = 90 - (0.5 * Math.atan2(2 * sxy, sxx - syy)) * 180 / Math.PI;
-    const bearing = azimuth - 90;
-    return ((bearing + 90) % 180 + 180) % 180 - 90; // into [-90, 90)
-}
-
-// GliderSection's 3D button: tilt to see the selected track's curtain side-on,
-// or flatten (north up) if the map is already tilted.
-watch(() => mainStore.gliderTiltToken, () => {
-    if (!map) return;
-    if (map.getPitch() > 10) {
-        map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
-        return;
-    }
-    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
-    // The curtain on show: the zoomed stretch when there is one.
-    const track = curtainTrack.length > 1 ? curtainTrack : g?.track ?? [];
-    if (track.length < 2) return;
-    const bearing = sideOnBearing(track);
-    // The curtain hangs toward the camera, so its bottom edge lands this far
-    // short of the track on screen: frame those points too.
-    const deepestM = mainStore.showSeafloor ? Math.max(curtainBottomM, seafloorDeepestM) : curtainBottomM;
-    const reachM = deepestM * CURTAIN_EXAGGERATION * Math.tan(GLIDER_TILT_PITCH * Math.PI / 180);
-    const b = bearing * Math.PI / 180;
-    const bounds = new mapboxgl.LngLatBounds();
-    for (const [lon, lat] of track) {
-        bounds.extend([lon, lat]);
-        bounds.extend([
-            lon - Math.sin(b) * reachM / (111_320 * Math.cos(lat * Math.PI / 180)),
-            lat - Math.cos(b) * reachM / 111_320,
-        ]);
-    }
-    map.fitBounds(bounds, { bearing, pitch: GLIDER_TILT_PITCH, padding: 60, maxZoom: 10, duration: 1200 });
-});
-
-watch(() => mainStore.selectedGliderId, (id) => {
-    setSelectedGlider(map, id);
-    // Offshore tracks often sit outside the Salish Sea view: bring the whole track in.
-    const g = mainStore.gliders.find(d => d.id === id);
-    if (!g || !map) return;
-    const [w, s, e, n] = g.bbox;
-    const view = map.getBounds();
-    if (!view?.contains([w, s]) || !view.contains([e, n])) {
-        map.fitBounds([[w, s], [e, n]], { padding: 80, maxZoom: 10, duration: 800 });
-    }
-});
-watch(() => mainStore.hoveredGliderId, (id) => setHoveredGlider(map, id));
-watch([() => mainStore.gliderPins, () => mainStore.gliderHover], ([pins, hover]) => setGliderPins(map, pins, hover));
-watch([() => mainStore.showGliderLayer, () => mainStore.showArgoLayer], () => {
-    if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.mapGliders, mainStore.gliderClips);
-    setGliderCurtainVisibility(map, selectedGliderShown());
-});
-
-async function getSensors() {
-    // Coverage only matters once a period is picked; it lands on its own.
-    axios.get(`${apiBaseUrl}/sensors/coverage`)
-        .then((r) => mainStore.setSensorCoverage(r.data))
-        .catch((e) => console.warn('sensor coverage failed:', e));
-    try {
-        const r = await axios.get(`${apiBaseUrl}/sensors`);
-        const data = r.data;
-        mainStore.setSensors(data);
-        return data;
-    } catch (e) {
-        console.error('Failed to fetch sensors:', e);
-        return [];
-    }
-}
-
-// Map-layer loading indicator (selectedInfo.vue's spinner). Every pane that
-// moves the map (Explore clicks, Model depth, Cross-Section, pickers, share
-// restore) funnels through updatePngOverlay, so tracking it here covers them
-// all. The spinner only shows after a delay so cached/fast tiles never flash
-// it; during playback the delay is longer, so animation stays clean unless a
-// frame genuinely stalls.
-const MAP_LOADING_DELAY_MS = 400;
-const MAP_LOADING_DELAY_PLAYING_MS = 1500;
-const MAP_LOADING_GIVE_UP_MS = 60_000;
-let mapLoadUrl: string | null = null;
-let mapLoadShowTimer: number | null = null;
-let mapLoadGiveUpTimer: number | null = null;
-
-function clearMapLoadTimers() {
-    if (mapLoadShowTimer != null) { clearTimeout(mapLoadShowTimer); mapLoadShowTimer = null; }
-    if (mapLoadGiveUpTimer != null) { clearTimeout(mapLoadGiveUpTimer); mapLoadGiveUpTimer = null; }
-}
-
-function beginMapLayerLoad(url: string) {
-    clearMapLoadTimers();
-    mapLoadUrl = url;
-    const delay = mainStore.timePlaying ? MAP_LOADING_DELAY_PLAYING_MS : MAP_LOADING_DELAY_MS;
-    mapLoadShowTimer = window.setTimeout(() => {
-        mapLoadShowTimer = null;
-        mainStore.setMapLayerLoading(true);
-    }, delay);
-    // Backstop in case mapbox never reports back (e.g. a request it dropped).
-    mapLoadGiveUpTimer = window.setTimeout(() => endMapLayerLoad(url), MAP_LOADING_GIVE_UP_MS);
-}
-
-function endMapLayerLoad(url: string | undefined) {
-    // A superseded request finishing must not hide the newer one's spinner.
-    if (!url || url !== mapLoadUrl) return;
-    mapLoadUrl = null;
-    clearMapLoadTimers();
-    mainStore.setMapLayerLoading(false);
-}
-
-// ImageSource sets `url` when a load starts and `loaded()` once its image
-// request completes (success fires 'sourcedata', failure fires 'error', both
-// tagged with sourceId), so matching the url pins the event to the latest request.
-function onPngSourceSettled(e: any) {
-    if (e?.sourceId !== 'png-image') return;
-    const src = map?.getSource('png-image') as any;
-    if (!src) return;
-    if (e.type === 'sourcedata' && !src.loaded?.()) return;
-    endMapLayerLoad(src.url);
-}
-
-// Paint for the model layer: packed raster values -> colours, from the store's colormap and range.
-// Separate from updatePngOverlay so a range/palette change only repaints (no image reload).
-function pngRasterPaint() {
-    const varName = mainStore.selected_variable.var;
-    const precision = mainStore.variables.find(v => v.var === varName)?.precision ?? 0.1;
-    return packedRasterPaint(selectedColormap.value, mainStore.selected_variable.colormapMin, mainStore.selected_variable.colormapMax, precision, 0);
-}
-
-// Add / update / remove PNG overlay for a given public PNG path
-async function updatePngOverlay(sourceId = 'png-image', layerId = 'png-image-layer') {
-    if (!map) throw new Error('map not initialized');
-    // if (!meta.value || !meta.value.bounds) throw new Error('metadata not loaded');
-
-    const source = mainStore.selected_variable.source.replace(/\s+/g, ''); // Remove spaces from source name for URL
-    const varName = mainStore.selected_variable.var;
-    // dt's shape tells the API which bin mode to render (see extract_image.resolve_bin_mode):
-    // full timestamp -> hourly, YYYY-MM-DD -> daily, YYYY-MM -> monthly. Keeps the map layer's
-    // resolution in sync with the Explore panel's bin-mode toggle used by the timeseries/depth charts.
-    const dtFormat = mainStore.exploreBinMode === 'daily' ? 'YYYY-MM-DD'
-        : mainStore.exploreBinMode === 'monthly' ? 'YYYY-MM'
-            : 'YYYY-MM-DDTHHmmss';
-    const dt = mainStore.selected_variable.dt?.format(dtFormat) || '';
-    const depth = mainStore.selected_variable.depth
-    const pngPath = `${apiBaseUrl}/png/${source}/${varName}/${dt}/${depth}`;
-
-    const bounds = mainStore.variables.find(v => v.source === mainStore.selected_variable.source && v.var === varName)?.bounds;
-    if (!bounds) throw new Error('bounds not found');
-    const [lonmin, latmin, lonmax, latmax] = bounds;
-    const coords = [
-        [lonmin, latmax], // top-left
-        [lonmax, latmax], // top-right
-        [lonmax, latmin], // bottom-right
-        [lonmin, latmin], // bottom-left
-    ] as [number, number][];
-
-    // remove existing if present
-    // try { if (map.getLayer(layerId)) map.removeLayer(layerId); } catch (e) { }
-    // try { if (map.getSource(sourceId)) map.removeSource(sourceId); } catch (e) { }
-
-    const paint = pngRasterPaint();
-
-    probeImage.value = {
-        url: pngPath, varName,
-        precision: mainStore.variables.find(v => v.var === varName)?.precision ?? 0.1,
-        bounds: [lonmin, latmin, lonmax, latmax],
-    };
-
-    beginMapLayerLoad(pngPath);
-    if (map.getSource(sourceId)) {
-        map.getSource(sourceId)?.updateImage({
-            type: 'image',
-            url: pngPath,
-            coordinates: coords
-        })
-        map.setPaintProperty(layerId, 'raster-color', paint.color);
-        map.setPaintProperty(layerId, 'raster-color-range', paint.range);
-    }
-    else {
-        map.addSource(sourceId, { type: 'image', url: pngPath, coordinates: coords });
-        map.addLayer({
-            id: layerId, type: 'raster', source: sourceId, paint: {
-                'raster-opacity': 1.0,
-                'raster-color': paint.color,
-                // Range of the packed integer values
-                'raster-color-range': paint.range,
-                // Mix to recover the 24-bit integer from normalized RGB [0..1]
-                // R_int = R_norm * 255. Packed = R_int*65536 + G_int*256 + B_int
-                // Coeffs: [255*65536, 255*256, 255, 0] -> [16711680, 65280, 255, 0]
-                'raster-color-mix': [256 * 256 * 255, 256 * 255, 255, 0],
-                'raster-fade-duration': 0
-            },
-            layout: { visibility: mainStore.showModelLayer ? 'visible' : 'none' },
-        }, 'country-boundaries');
-    }
-
-    // save active overlay metadata on the map instance for access by click handler
-    const overlayObj: any = { bounds: [lonmin, latmin, lonmax, latmax], coords, varName, depth: depth, pngPath, meta, clickHandler: null };
-    // remove previous click handler if present
-    const prev = (map as any).__activePngOverlay;
-    if (prev && prev.clickHandler) {
-        try { map.off('click', prev.clickHandler); } catch (e) { }
-    }
-    (map as any).__activePngOverlay = overlayObj;
-
-    // register a click handler that queries the API for a timeseries at the clicked coordinate
-    const onMapClick = async (evt: any) => {
-        // While drawing a cross-section line, clicks add vertices via
-        // crossSectionDraw (see onCrossSectionDrawChange) — they aren't a
-        // point query, and must not clear the sensor selection mid-draw.
-        if (mainStore.activeBottomTab === 'crossSection' || mainStore.activeBottomTab === 'area') return;
-
-        const { lng, lat } = evt.lngLat;
-
-        // Check if click landed on a sensor feature (layer may not exist yet)
-        const stationLayers = map.getLayer('stations-circles') ? ['stations-circles'] : [];
-        const features = stationLayers.length
-            ? map.queryRenderedFeatures(evt.point, { layers: stationLayers })
-            : [];
-
-        // Glider tracks/heads are handled by useGliderLayer's own click handler.
-        const gliderLayers = GLIDER_CLICK_LAYERS.filter(id => map.getLayer(id));
-        if (gliderLayers.length && map.queryRenderedFeatures(evt.point, { layers: gliderLayers }).length) return;
-        // So are ship casts, by useCastLayer's.
-        const castLayers = CAST_CLICK_LAYERS.filter(id => map.getLayer(id));
-        if (castLayers.length && map.queryRenderedFeatures(evt.point, { layers: castLayers }).length) return;
-
-        if (features.length > 0) {
-            // Sensor click is fully handled by useStationsInteraction → clickSensor.
-            // Returning here prevents a duplicate getTimeseriesPromises call.
-            return;
-        }
-
-        mainStore.setSelectedSensor(null); // Clear selected sensor on map click
-        mainStore.selectGlider(null);
-        mainStore.selectCast(null);
-        sensorPicker.value.visible = false;
-        mainStore.setLastClickedMapPoint({ lat, lng });
-    };
-
-    // register click handler
-    overlayObj.clickHandler = onMapClick;
-    map.on('click', onMapClick);
+    mainStore.setSelectedSensor(null); // Clear selected sensor on map click
+    mainStore.selectGlider(null);
+    mainStore.selectCast(null);
+    sensorPicker.value.visible = false;
+    mainStore.setLastClickedMapPoint({ lat, lng });
 }
 
 /** Drops the click marker at a coordinate. Data fetching is the panes' job. */
@@ -1505,100 +724,6 @@ function trigger_mapClick(lat: number, lng: number) {
         (map as any).__clickMarker = marker;
     }
 }
-
-// NOTE: stopping animator on every change to `mainStore.selected_variable` caused the animator to stop
-// immediately after it updated the selected timestamp (dt). That logic is already handled by the
-// var/depth watcher above. Removed the blanket watcher to avoid stopping playback when the animator
-// updates the selected datetime.
-
-function removePngOverlay(sourceId = 'png-image', layerId = 'png-image-layer') {
-    if (!map) return;
-    try { const ov = (map as any).__activePngOverlay; if (ov && ov.clickHandler) map.off('click', ov.clickHandler); } catch (e) { }
-    try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
-    try { if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId); } catch (e) { }
-    try { if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId); } catch (e) { }
-    try { delete (map as any).__activePngOverlay; } catch (e) { }
-}
-
-// Bathymetry tiles are packed from -3000 m.
-function bathymetryRasterPaint() {
-    const precision = mainStore.variables.find(v => v.var === 'bathymetry')?.precision ?? 1;
-    return packedRasterPaint(selectedColormap.value, selectedVariable.value.colormapMin, selectedVariable.value.colormapMax, precision, -3000);
-}
-
-// Add bathymetry tiles layer based on raster tiles from backend
-function addBathymetryTilesLayer(sourceId = 'bathymetry-tiles', layerId = 'bathymetry-tiles-layer') {
-    if (!map) return;
-
-    try {
-        // Remove existing layer and source if they exist
-        if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId);
-        if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId);
-
-        // Add raster tile source for bathymetry
-        map.addSource(sourceId, {
-            type: 'raster',
-            tiles: [`${apiBaseUrl}/raster_tiles/{z}/{x}/{y}.webp`],
-            tileSize: 512,
-        });
-
-        const paint = bathymetryRasterPaint();
-        map.addLayer({
-            id: layerId,
-            type: 'raster',
-            source: sourceId,
-            paint: {
-                // Decode packed 24-bit integer: value = (R*m0 + G*m1 + B*m2) / 255 = R*65536 + G*256 + B
-                'raster-color-mix': [16711680, 65280, 255, 0],
-                'raster-color': paint.color,
-                'raster-color-range': paint.range,
-            }
-        }, 'country-boundaries');
-
-        // Store metadata for cleanup
-        (map as any).__activeBathymetryLayer = {
-            sourceId,
-            layerId,
-        };
-    } catch (e) {
-        console.error('Error adding bathymetry tiles layer:', e);
-    }
-}
-
-// Update bathymetry tiles layer colorization
-function updateBathymetryTilesLayerColorization(layerId = 'bathymetry-tiles-layer') {
-    if (!map) return;
-
-    try {
-        if (!map.getLayer(layerId)) return;
-
-        const paint = bathymetryRasterPaint();
-        map.setPaintProperty(layerId, 'raster-color', paint.color);
-        map.setPaintProperty(layerId, 'raster-color-range', paint.range);
-    } catch (e) {
-        console.error('Error updating bathymetry tiles colorization:', e);
-    }
-}
-
-// Remove bathymetry tiles layer
-function removeBathymetryTilesLayer() {
-    if (!map) return;
-
-    try {
-        const bathy = (map as any).__activeBathymetryLayer;
-        if (!bathy) return;
-
-        const { sourceId = 'bathymetry-tiles', layerId = 'bathymetry-tiles-layer' } = bathy;
-
-        try { if (map.getLayer && map.getLayer(layerId)) map.removeLayer(layerId); } catch (e) { }
-        try { if (map.getSource && map.getSource(sourceId)) map.removeSource(sourceId); } catch (e) { }
-        try { delete (map as any).__activeBathymetryLayer; } catch (e) { }
-    } catch (e) {
-        console.error('Error removing bathymetry tiles layer:', e);
-    }
-}
-
-
 
 async function autorange() {
     if (!map || !mapLoaded.value) {
@@ -1667,202 +792,6 @@ async function autorange() {
     }
 }
 
-// --- ANALYSIS REGION BOX ---
-const ABOX_SOURCE = 'analysis-region'
-const ABOX_FILL = 'analysis-region-fill'
-const ABOX_LINE = 'analysis-region-line'
-
-function updateAnalysisBox() {
-    if (!map || !map.isStyleLoaded()) return
-    const pt = lastClicked.value
-    const show = mainStore.queryMode === 'area' && !!pt
-
-    const data: GeoJSON.Feature<GeoJSON.Polygon> = show
-        ? {
-            type: 'Feature', properties: {}, geometry: {
-                type: 'Polygon', coordinates: [[
-                    [pt!.lng - 0.05, pt!.lat - 0.05],
-                    [pt!.lng + 0.05, pt!.lat - 0.05],
-                    [pt!.lng + 0.05, pt!.lat + 0.05],
-                    [pt!.lng - 0.05, pt!.lat + 0.05],
-                    [pt!.lng - 0.05, pt!.lat - 0.05],
-                ]]
-            }
-        }
-        : { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[]] } }
-
-    if (map.getSource(ABOX_SOURCE)) {
-        (map.getSource(ABOX_SOURCE) as mapboxgl.GeoJSONSource).setData(data)
-        map.setLayoutProperty(ABOX_FILL, 'visibility', show ? 'visible' : 'none')
-        map.setLayoutProperty(ABOX_LINE, 'visibility', show ? 'visible' : 'none')
-    } else {
-        map.addSource(ABOX_SOURCE, { type: 'geojson', data })
-        map.addLayer({
-            id: ABOX_FILL, type: 'fill', source: ABOX_SOURCE,
-            paint: { 'fill-color': 'rgba(255,193,7,0.08)' },
-            layout: { visibility: show ? 'visible' : 'none' }
-        })
-        map.addLayer({
-            id: ABOX_LINE, type: 'line', source: ABOX_SOURCE,
-            paint: { 'line-color': '#ff5722', 'line-width': 1.5, 'line-dasharray': [4, 2] },
-            layout: { visibility: show ? 'visible' : 'none' }
-        })
-    }
-}
-
-watch([lastClicked, activeTab], updateAnalysisBox)
-watch(() => mainStore.queryMode, () => {
-    updateAnalysisBox()
-    if (lastClicked.value) trigger_mapClick(lastClicked.value.lat, lastClicked.value.lng)
-})
-
-// No activeTab watcher any more: panes that were hidden used to miss updates
-// because this page fetched on their behalf and gated on which tab was showing.
-// Each pane now watches the store itself and re-measures when it becomes active.
-
-// --- CROSS-SECTION LINE DRAWING ---
-// This one *is* an activeTab watcher, unlike the panes above — it isn't data
-// fetching done on a pane's behalf, it's map-control-mode plumbing that has to
-// live here because `crossSectionDraw`/`map` are page-scoped, not reachable
-// from CrossSectionPanel.vue.
-function onCrossSectionDrawChange() {
-    const line = crossSectionDraw?.getAll().features
-        .find((f) => f.geometry?.type === 'LineString') as GeoJSON.Feature<GeoJSON.LineString> | undefined;
-    if (!line) { mainStore.setCrossSectionLine(null); return; }
-    // GeoJSON coordinates are [lng, lat]; the store (like lastClickedMapPoint) uses {lat, lng}.
-    mainStore.setCrossSectionLine(line.geometry.coordinates.map(([lng, lat]) => ({ lat: lat!, lng: lng! })));
-}
-
-// mapbox-gl-draw only renders vertex handles while the line is the *active*
-// selection (mid-draw, or selected in simple_select) — once you click away it
-// reverts to a plain line, so there's nothing on the map to tell "dashed line
-// #2 in the chart" apart from "dashed line #3". This numbered overlay stays
-// pinned to the vertices regardless of draw/selection state, matching the
-// 1-based numbering CrossSectionPanel.vue's own vertex markers use.
-const CS_VERTEX_SOURCE = 'cross-section-vertices'
-const CS_VERTEX_CIRCLES = 'cross-section-vertex-circles'
-const CS_VERTEX_LABELS = 'cross-section-vertex-labels'
-
-function updateCrossSectionVertexLabels() {
-    if (!map) return
-    const line = mainStore.crossSectionLine
-    const data: GeoJSON.FeatureCollection<GeoJSON.Point> = {
-        type: 'FeatureCollection',
-        features: (line ?? []).map((pt, i) => ({
-            type: 'Feature',
-            properties: { label: String(i + 1) },
-            geometry: { type: 'Point', coordinates: [pt.lng, pt.lat] },
-        })),
-    }
-    const existingSource = map.getSource(CS_VERTEX_SOURCE) as mapboxgl.GeoJSONSource | undefined;
-    if (existingSource) {
-        // Updating an existing source's data doesn't require the style to be
-        // fully loaded — only creating new sources/layers below does. Gating
-        // this on isStyleLoaded() left stale vertex markers on the map when a
-        // tab switch fired mid-style-update (e.g. right after deleteAll()).
-        existingSource.setData(data)
-    } else if (map.isStyleLoaded()) {
-        map.addSource(CS_VERTEX_SOURCE, { type: 'geojson', data })
-        map.addLayer({
-            id: CS_VERTEX_CIRCLES, type: 'circle', source: CS_VERTEX_SOURCE,
-            paint: {
-                'circle-radius': 8, 'circle-color': '#12181f',
-                'circle-stroke-width': 1.5, 'circle-stroke-color': '#eef3f7',
-            },
-        })
-        map.addLayer({
-            id: CS_VERTEX_LABELS, type: 'symbol', source: CS_VERTEX_SOURCE,
-            layout: {
-                'text-field': ['get', 'label'], 'text-size': 10, 'text-font': ['Open Sans Bold'],
-                'text-allow-overlap': true, 'text-ignore-placement': true,
-            },
-            paint: { 'text-color': '#eef3f7' },
-        })
-    }
-}
-
-watch(() => mainStore.crossSectionLine, updateCrossSectionVertexLabels, { deep: true })
-
-watch(activeTab, (tab) => {
-    if (!crossSectionDraw) return;
-    crossSectionDraw.deleteAll();
-    mainStore.setCrossSectionLine(null);
-    crossSectionDraw.changeMode(tab === 'crossSection' ? 'draw_line_string' : 'simple_select');
-
-    // The point-click marker and the cross-section line/vertices are mutually
-    // exclusive map decorations — only one mode's input should be visible at a time.
-    if (tab === 'crossSection' || tab === 'area') {
-        try { if ((map as any).__clickMarker) ((map as any).__clickMarker).remove(); } catch (e) { }
-    } else if (lastClicked.value) {
-        trigger_mapClick(lastClicked.value.lat, lastClicked.value.lng);
-    }
-});
-
-// A finished line leaves mapbox-gl-draw in simple_select mode (its own
-// draw_line_string mode exits there once you click back on the last vertex or
-// press Enter) — clicking the map again would just select/drag the existing
-// line, not start a new one. CrossSectionPanel's "New line" button bumps this
-// token to re-arm drawing without waiting for a tab round-trip.
-// Ring the selected sensor's marker.
-watch(() => mainStore.selectedSensor?.id, (id) => setSelectedBuoy(map, id ?? null));
-watch(() => mainStore.hoveredSensorId, (id) => setHoveredBuoy(map, id));
-
-watch(() => mainStore.crossSectionRedrawToken, () => {
-    if (!crossSectionDraw) return;
-    crossSectionDraw.deleteAll();
-    crossSectionDraw.changeMode('draw_line_string');
-});
-
-// --- AREA TAB CIRCLE ---
-// Shown only on the Area tab; drawing is armed on entering it with no circle
-// yet, and by AreaPanel's "Redraw" (obsAreaDrawToken).
-let areaLayer: ReturnType<typeof useObsAreaLayer> | null = null;
-const AREA_DEFAULT_DEPTH: [number, number] = [0, 20];
-
-function syncAreaLayer() {
-    if (!areaLayer) return;
-    const onTab = activeTab.value === 'area';
-    // Only arms or disarms on its own when there's no circle or no tab: a
-    // depth change mid-redraw must not cancel the redraw.
-    if (!onTab) areaLayer.arm(false);
-    else if (!mainStore.obsArea) areaLayer.arm(true);
-    areaLayer.render(onTab ? mainStore.obsArea : null);
-}
-watch([activeTab, () => mainStore.obsArea], syncAreaLayer);
-watch(() => mainStore.obsAreaDrawToken, () => {
-    if (activeTab.value === 'area') areaLayer?.arm(true);
-});
-
-// The box in 3D under the circle, seen when the map is tilted
-// (useGliderCurtain.ts): a cylinder over the depth range, with the loaded
-// observations (mainStore.obsAreaMarkers) as dots at their depths.
-const AREA_RGB = hexToRgb(chart.model);
-function updateAreaVolume() {
-    const a = mainStore.obsArea;
-    if (!map || activeTab.value !== 'area' || !a) {
-        setAreaVolume(map, null);
-        return;
-    }
-    setAreaVolume(map, {
-        ...a,
-        rgb: AREA_RGB,
-        markers: mainStore.obsAreaMarkers.map(m => ({ ...m, rgb: hexToRgb(m.color) })),
-    }, GLIDER_BASE_LAYER);
-}
-watch([activeTab, () => mainStore.obsArea, () => mainStore.obsAreaMarkers], updateAreaVolume);
-
-// AreaPanel's 3D button: tilt onto the box (north up), or flatten.
-watch(() => mainStore.obsAreaTiltToken, () => {
-    const a = mainStore.obsArea;
-    if (!map || !a) return;
-    if (map.getPitch() > 10) {
-        map.easeTo({ pitch: 0, bearing: 0, duration: 800 });
-        return;
-    }
-    // Fit the cylinder itself, both rims at their exaggerated depths.
-    const cam = cameraForAreaVolume(map, a, GLIDER_TILT_PITCH);
-    map.easeTo({ ...cam, bearing: 0, pitch: GLIDER_TILT_PITCH, duration: 1200 });
-});
 </script>
 
 <style scoped>
