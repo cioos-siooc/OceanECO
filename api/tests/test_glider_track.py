@@ -16,3 +16,12 @@ def test_simplify_leaves_a_real_data_gap_as_one_step():
     kept = gliders._simplify(pts, 0.002, 12 * 3600)
     assert any(b[2] - a[2] > 12 * 3600 for a, b in zip(kept, kept[1:]))
     assert kept[0] == pts[0] and kept[-1] == pts[-1]
+
+
+def test_argo_sections_fill_gaps_inside_a_profile_only():
+    import numpy as np
+    from gliders import _fill_vertical_gaps
+    grid = np.array([[np.nan], [1.0], [np.nan], [np.nan], [4.0], [np.nan]])
+    _fill_vertical_gaps(grid)
+    assert np.isnan(grid[0, 0]) and np.isnan(grid[5, 0])
+    assert grid[2, 0] == 2.0 and grid[3, 0] == 3.0

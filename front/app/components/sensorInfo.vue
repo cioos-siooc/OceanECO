@@ -9,17 +9,17 @@
                  higher, and the badge says a filter is on while it's shut. -->
             <div class="sensors__head">
                 <div class="flex items-center gap-1">
-                    <SegmentedControl v-model="kind" :items="kindItems" size="xs" block class="grow"
+                    <SegmentedControl v-model="kind" :items="kindItems" size="xs" block class="grow sensors__kinds"
                         aria-label="Instrument type" />
                     <UButton size="xs" variant="ghost" color="neutral" class="shrink-0"
                         :icon="kindLayerOn ? 'i-mdi-eye-outline' : 'i-mdi-eye-off-outline'"
                         :aria-pressed="kindLayerOn"
-                        :aria-label="`${kindLayerOn ? 'Hide' : 'Show'} ${kind} on the map`"
-                        :title="`${kindLayerOn ? 'Hide' : 'Show'} ${kind} on the map`"
+                        :aria-label="`${kindLayerOn ? 'Hide' : 'Show'} ${kindNoun} on the map`"
+                        :title="`${kindLayerOn ? 'Hide' : 'Show'} ${kindNoun} on the map`"
                         @click="toggleKindLayer" />
                 </div>
                 <div v-if="kind !== 'casts'" class="flex items-center gap-1">
-                    <UInput v-model="query" icon="i-mdi-magnify" :placeholder="`Search ${kind}`" size="sm" class="grow" />
+                    <UInput v-model="query" icon="i-mdi-magnify" :placeholder="`Search ${kindNoun}`" size="sm" class="grow" />
                     <USelect v-model="sortMode" :items="sortItems" size="xs" variant="ghost"
                         class="sensors__sort" aria-label="Sort" />
                     <UPopover v-if="kind === 'stations'" v-model:open="showFilters" :content="{ side: 'bottom', align: 'end' }">
@@ -80,7 +80,7 @@
             </div>
 
             <div v-if="kind !== 'casts' && kindCount === 0" class="text-center text-muted p-4 grid gap-2 justify-items-center">
-                <span>No {{ kind }} match{{ kind === 'stations' ? ' your filters' : '' }}.</span>
+                <span>No {{ kindNoun }} match{{ kind === 'stations' ? ' your filters' : '' }}.</span>
                 <UButton v-if="otherKindCount" size="xs" variant="outline" color="neutral" @click="searchOtherKind">
                     {{ otherKindCount }} {{ otherKindCount === 1 ? otherKind.slice(0, -1) : otherKind }} match{{ otherKindCount === 1 ? 'es' : '' }}
                 </UButton>
@@ -133,34 +133,37 @@
                 </div>
             </div>
 
-            <!-- C-PROOF gliders: a deployment moves, so a row shows its
-                 mission window and distance flown instead of a depth. -->
-            <div v-else-if="kind === 'gliders'" class="sensors__list">
+            <!-- C-PROOF gliders and Argo floats: they move, so a row shows
+                 the distance travelled instead of a depth. -->
+            <div v-else-if="kind === 'gliders' || kind === 'argo'" class="sensors__list">
                 <div v-for="g in sortedGliders" :key="g.id" :ref="setSensorRef(`glider:${g.id}`)"
                     role="button" tabindex="0" class="srow" :class="{ 'srow--on': g.id === mainStore.selectedGliderId }"
                     @click="mainStore.selectGlider(g.id)" @keydown.enter="mainStore.selectGlider(g.id)"
                     @mouseenter="mainStore.hoveredGliderId = g.id" @mouseleave="mainStore.hoveredGliderId = null">
                     <span class="srow__dot" :class="g.active ? 'srow__dot--live' : 'srow__dot--historic'"
-                        :title="g.active ? 'Live: on mission now' : 'Recovered'" />
-                    <span class="srow__name">{{ g.id }}</span>
+                        :title="g.kind === 'argo' ? (g.active ? 'Live: a profile in the last 30 days' : 'No recent profile') : (g.active ? 'Live: on mission now' : 'Recovered')" />
+                    <span class="srow__name">{{ g.kind === 'argo' ? `Float ${g.glider}` : g.id }}</span>
                     <span class="srow__depth oe-num" :title="mainStore.gliderClips ? 'Along-track distance inside the observation period, of the whole mission' : undefined">
                         <template v-if="mainStore.gliderClips?.[g.id]">{{ Math.round(mainStore.gliderClips[g.id]!.km) }} of </template>{{ Math.round(g.distanceKm) }} km
                     </span>
                     <span class="srow__sub oe-num">
-                        <span>C-PROOF</span>
-                        <span class="srow__vars">{{ g.variables.map(v => variableShort(v)).join(' ') }} · glider</span>
+                        <span>{{ g.kind === 'argo' ? 'Argo' : 'C-PROOF' }}</span>
+                        <span class="srow__vars">{{ g.variables.map(v => variableShort(v)).join(' ') }} · {{ g.kind === 'argo' ? 'float' : 'glider' }}</span>
                         <span class="srow__age">{{ gliderAge(g.end) }}</span>
                     </span>
                     <div v-if="g.id === mainStore.selectedGliderId" class="srow__detail" @click.stop>
                         <div class="srow__kv">
-                            <span>Mission</span><span class="oe-num">{{ gliderRange(g) }}</span>
+                            <span>{{ g.kind === 'argo' ? 'Profiles from' : 'Mission' }}</span><span class="oe-num">{{ gliderRange(g) }}</span>
                             <span>Profiles</span><span class="oe-num">{{ g.profiles }}</span>
                             <span>Platform</span><span>{{ g.platformType }}<template v-if="g.station"> · from {{ g.station }}</template></span>
-                            <span>Data</span><span>{{ g.variant === 'grid' ? 'Real-time' : 'Delayed mode' }}, unscreened</span>
+                            <span>Data</span><span v-if="g.kind === 'argo'">Argo QC'd: good values, adjusted where available</span>
+                            <span v-else>{{ g.variant === 'grid' ? 'Real-time' : 'Delayed mode' }}, unscreened</span>
                             <span v-if="g.summary">Notes</span><span v-if="g.summary">{{ g.summary }}</span>
                         </div>
                         <div class="srow__acts">
-                            <UButton size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
+                            <UButton v-if="g.kind === 'argo'" size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
+                                :to="g.fileUrl" target="_blank">Euro-Argo float page</UButton>
+                            <UButton v-else size="xs" variant="outline" color="neutral" icon="i-mdi-open-in-new"
                                 :to="`https://cproof.uvic.ca/gliderdata/deployments/${g.glider}/${g.id}/`" target="_blank">C-PROOF page</UButton>
                         </div>
                     </div>
@@ -345,17 +348,18 @@ const sortedSensors = computed(() => {
     return list.sort((a, b) => statusRank(a) - statusRank(b));
 });
 
-// Gliders have their own search, which narrows the list only (the map keeps
-// every track); the stations' search lives in the store because the markers
-// follow it. "Nearest" measures to the latest fix, where the map draws the triangle.
+// Gliders and Argo floats share a search, which narrows the list only (the
+// map keeps every marker); the stations' search lives in the store because the
+// markers follow it. "Nearest" measures to the latest fix, where the map draws the marker.
 const gliderQuery = ref('');
-function glidersMatching(query: string) {
+function glidersMatching(query: string, k: GliderDeployment['kind']) {
     const q = query.trim().toLowerCase();
-    if (!q) return mainStore.filteredGliders;
-    return mainStore.filteredGliders.filter(g =>
+    const list = mainStore.filteredGliders.filter(g => g.kind === k);
+    if (!q) return list;
+    return list.filter(g =>
         [g.id, g.glider, g.station, g.platformType, g.summary].some(f => f?.toLowerCase().includes(q)));
 }
-const filteredGliders = computed(() => glidersMatching(gliderQuery.value));
+const filteredGliders = computed(() => glidersMatching(gliderQuery.value, kind.value === 'argo' ? 'argo' : 'glider'));
 
 function gliderKm(g: GliderDeployment): number | null {
     const fix = g.track[g.track.length - 1];
@@ -375,11 +379,14 @@ const sortedGliders = computed(() => {
 
 // One tab per instrument kind; the map always shows every kind whose layer is
 // on, whichever tab is open. Selecting on the map switches to the matching tab.
-type Kind = 'stations' | 'gliders' | 'casts';
-const kind = ref<Kind>(mainStore.selectedGliderId ? 'gliders' : mainStore.selectedCastId ? 'casts' : 'stations');
+type Kind = 'stations' | 'gliders' | 'argo' | 'casts';
+const kindOfGlider = (id: string): Kind => (mainStore.gliders.find(g => g.id === id)?.kind === 'argo' || id.startsWith('argo-') ? 'argo' : 'gliders');
+const kind = ref<Kind>(mainStore.selectedGliderId ? kindOfGlider(mainStore.selectedGliderId) : mainStore.selectedCastId ? 'casts' : 'stations');
 // Search hops only between stations and gliders; casts have no search.
 const otherKind = computed<Kind>(() => (kind.value === 'stations' ? 'gliders' : 'stations'));
-const countOf = (k: Kind) => (k === 'stations' ? filteredSensors.value.length : k === 'gliders' ? filteredGliders.value.length : mainStore.castsTotal);
+const countOf = (k: Kind) => (k === 'stations' ? filteredSensors.value.length
+    : k === 'casts' ? mainStore.castsTotal
+    : glidersMatching(gliderQuery.value, k === 'argo' ? 'argo' : 'glider').length);
 const kindCount = computed(() => countOf(kind.value));
 
 const query = computed({
@@ -390,7 +397,7 @@ const query = computed({
 const otherKindCount = computed(() => {
     if (kind.value === 'casts' || !query.value.trim()) return 0;
     return otherKind.value === 'gliders'
-        ? glidersMatching(query.value).length
+        ? glidersMatching(query.value, 'glider').length
         : mainStore.sensors.filter(s => sensorMatches(s, query.value, organizationFilter.value, variableFilter.value)).length;
 });
 function searchOtherKind() {
@@ -400,21 +407,24 @@ function searchOtherKind() {
     query.value = q;
 }
 
-const layerOn = (k: Kind) => (k === 'stations' ? mainStore.showSensorLayer : k === 'gliders' ? mainStore.showGliderLayer : mainStore.showCastLayer);
+const layerOn = (k: Kind) => ({ stations: mainStore.showSensorLayer, gliders: mainStore.showGliderLayer, argo: mainStore.showArgoLayer, casts: mainStore.showCastLayer })[k];
 const kindLayerOn = computed(() => layerOn(kind.value));
 function toggleKindLayer() {
     if (kind.value === 'stations') mainStore.setShowSensorLayer(!mainStore.showSensorLayer);
     else if (kind.value === 'gliders') mainStore.setShowGliderLayer(!mainStore.showGliderLayer);
+    else if (kind.value === 'argo') mainStore.setShowArgoLayer(!mainStore.showArgoLayer);
     else mainStore.setShowCastLayer(!mainStore.showCastLayer);
 }
 
-const kindLabel: Record<Kind, string> = { stations: 'Stations', gliders: 'Gliders', casts: 'Casts' };
+const kindLabel: Record<Kind, string> = { stations: 'Stations', gliders: 'Gliders', argo: 'Argo', casts: 'Casts' };
+const kindNoun = computed(() => (kind.value === 'argo' ? 'Argo floats' : kind.value));
 // A tab whose layer is off carries an eye-off, so the state shows from any tab.
-const kindItems = computed(() => (['stations', 'gliders', 'casts'] as Kind[])
-    .filter(k => k !== 'casts' || mainStore.castYears.length)
+const kindItems = computed(() => (['stations', 'gliders', 'argo', 'casts'] as Kind[])
+    .filter(k => (k !== 'casts' || mainStore.castYears.length) && (k !== 'argo' || mainStore.gliders.some(g => g.kind === 'argo')))
     .map(k => ({
         value: k,
-        label: `${kindLabel[k]} · ${countOf(k).toLocaleString('en-CA')}`,
+        // Name over count: four tabs don't fit one line each.
+        label: `${kindLabel[k]}\n${countOf(k).toLocaleString('en-CA')}`,
         icon: layerOn(k) ? undefined : 'i-mdi-eye-off-outline',
         title: layerOn(k) ? undefined : `${kindLabel[k]} (hidden on the map)`,
     })));
@@ -512,7 +522,7 @@ watch(() => selectedSensor.value?.id, (id: string | undefined) => {
 });
 watch(() => mainStore.selectedGliderId, (id) => {
     if (!id) return;
-    kind.value = 'gliders';
+    kind.value = kindOfGlider(id);
     scrollToRow(`glider:${id}`);
 });
 watch(() => mainStore.selectedCastId, (id) => {
@@ -545,6 +555,10 @@ function openInfoDialog(sensor: typeof mainStore.sensors[number]) {
 </script>
 
 <style scoped>
+.sensors__kinds :deep(.seg) {
+    white-space: pre-line;
+    line-height: 1.25;
+}
 .sensors {
     height: 100%;
     display: flex;

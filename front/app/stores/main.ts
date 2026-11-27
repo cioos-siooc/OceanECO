@@ -4,7 +4,7 @@ import { markRaw } from 'vue';
 import { chart as chartPalette } from '@/config/palette';
 import { trackEvent } from '~~/composables/useAnalytics';
 import { mergeSensors, resolveMergedId, type MergeableSensor } from '@/utils/sensorMerge';
-import { NO_OBS_FILTER, clipTrack, matchingIntervals, monthMatches, pathKm, resolveObsFilter, type ObsFilter, type ResolvedObsFilter } from '@/utils/obsFilter';
+import { ARGO_GAP_S, NO_OBS_FILTER, TRACK_GAP_S, clipTrack, matchingIntervals, monthMatches, pathKm, resolveObsFilter, type ObsFilter, type ResolvedObsFilter } from '@/utils/obsFilter';
 
 // Depths are plain numbers (the WebP filename stem too, e.g. 18.0 -> "18.0.webp")
 // — -1 is the synthetic bottom-layer sentinel ("bottom.webp").
@@ -60,9 +60,13 @@ export interface CastVariableMeta {
     modelled: boolean
 }
 
-/** One C-PROOF glider deployment, as `GET /gliders` returns it. */
+/** One C-PROOF glider deployment (`GET /gliders`) or Argo float (`GET /argo`,
+ *  id "argo-<WMO>", its cycles as profiles): both are moving profilers, so the
+ *  map, Explore's section and the Area tab treat them alike. */
 export interface GliderDeployment {
     id: string
+    kind: 'glider' | 'argo'
+    /** Glider name, or the float's WMO number. */
     glider: string
     platformType: string
     summary: string
@@ -175,8 +179,9 @@ function createInitialState() {
         // Sensor under the pointer in the sensor list; the map highlights its marker.
         hoveredSensorId: null as string | null,
 
-        // C-PROOF glider deployments (`GET /gliders`). Kept apart from `sensors`:
-        // a deployment moves, so it has a track rather than one position.
+        // C-PROOF glider deployments and Argo floats (`GET /gliders`, `/argo`).
+        // Kept apart from `sensors`: they move, so each has a track rather than
+        // one position. The Gliders and Argo tabs and map toggles split them by `kind`.
         gliders: [] as GliderDeployment[],
         selectedGliderId: null as string | null,
         hoveredGliderId: null as string | null,
@@ -185,6 +190,7 @@ function createInitialState() {
         // track and the curtain shows only it.
         gliderRange: null as [number, number] | null,
         showGliderLayer: true,
+        showArgoLayer: true,
         // Bumped by GliderSection's 3D button: index.vue (which holds the map)
         // tilts onto the selected track, or flattens the map if already tilted.
         gliderTiltToken: 0,
@@ -399,7 +405,7 @@ export const useMainStore = defineStore('main', {
                 if (g.track.length < 2) continue;
                 const t0 = g.track[0]![2] * 1000, t1 = g.track[g.track.length - 1]![2] * 1000;
                 const mid = g.track[g.track.length >> 1]!;
-                const segments = clipTrack(g.track, matchingIntervals(period, t0, t1, mid[1], mid[0]));
+                const segments = clipTrack(g.track, matchingIntervals(period, t0, t1, mid[1], mid[0]), g.kind === 'argo' ? ARGO_GAP_S : TRACK_GAP_S);
                 if (!segments.length) continue;
                 const whole = pathKm(g.track);
                 const km = whole > 0 ? g.distanceKm * segments.reduce((a, s) => a + pathKm(s), 0) / whole : 0;
@@ -413,14 +419,20 @@ export const useMainStore = defineStore('main', {
             return clips ? state.gliders.filter(g => clips[g.id]) : state.gliders;
         },
 
+        /** The gliders and floats the map shows: filteredGliders whose kind's layer is on. */
+        mapGliders(state): GliderDeployment[] {
+            const gliders: GliderDeployment[] = this.filteredGliders;
+            return gliders.filter(g => (g.kind === 'argo' ? state.showArgoLayer : state.showGliderLayer));
+        },
+
         /** What the map shows, as the Area tab's query names it: stored
          *  sensor ids (a merge's members), glider deployments, and casts. */
         visibleObsSources(state): { sensorIds: string[], gliderIds: string[], casts: boolean } {
             const sensors: Sensor[] = this.filteredSensors;
-            const gliders: GliderDeployment[] = this.filteredGliders;
+            const gliders: GliderDeployment[] = this.mapGliders;
             return {
                 sensorIds: state.showSensorLayer ? sensors.flatMap(s => (s.members ? s.members.map(m => m.id) : [s.id])) : [],
-                gliderIds: state.showGliderLayer ? gliders.map(g => g.id) : [],
+                gliderIds: gliders.map(g => g.id),
                 casts: state.showCastLayer && state.castYears.length > 0,
             };
         },
@@ -582,6 +594,9 @@ export const useMainStore = defineStore('main', {
         },
         setShowGliderLayer(value: boolean) {
             this.showGliderLayer = value;
+        },
+        setShowArgoLayer(value: boolean) {
+            this.showArgoLayer = value;
         },
         toggleGliderTilt() {
             this.gliderTiltToken++;

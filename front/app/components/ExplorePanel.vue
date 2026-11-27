@@ -418,7 +418,8 @@ const exploreSubViews = computed(() => {
   // A glider's section is the only view about the glider; the others show the
   // last map click or sensor, so they're hidden until the glider is cleared.
   if (mainStore.selectedGliderId) {
-    return [{ value: 'glider', label: 'Glider', title: 'The selected glider deployment along its track' }]
+    const argo = mainStore.selectedGliderId.startsWith('argo-')
+    return [{ value: 'glider', label: argo ? 'Argo float' : 'Glider', title: argo ? 'The selected Argo float, profile by profile' : 'The selected glider deployment along its track' }]
   }
   const hasProfiler = !!mainStore.selectedProfilerSensorId
   return [

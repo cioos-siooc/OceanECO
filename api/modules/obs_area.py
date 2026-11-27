@@ -3,7 +3,7 @@ depth range, and the observation period (front/app/utils/obsFilter.ts).
 
 It reads only the sources the map is showing, as the frontend lists them:
 the visible sensors (moorings, ONC sites; a display-time merge arrives as its
-members' ids), the visible glider deployments, and the ship casts when their
+members' ids), the visible glider deployments and Argo floats, and the ship casts when their
 layer is on. Nothing else in the box is read.
 
 A platform is one sensor, one glider deployment, or one cast. Sensor and
@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from modules.clickhouse_helpers import get_ch_client
+from modules.gliders import argo_profiles_sql, is_argo
 from modules.ship_casts import _iso, cast_filter_sql, daylight_sql, variable_meta
 
 MAX_RADIUS_KM = 200
@@ -147,34 +148,53 @@ def _sensor_rows(client, ids: list[str], base: dict, period: dict, diel: str, un
     return platforms, rows
 
 
+def _moving_tables(ids: list[str]) -> list[tuple[str, str]]:
+    """(table, type) per kind of moving platform in `ids`: glider deployments
+    or Argo floats, both in glider_profiles' columns, for the {g:Array(String)}
+    parameter."""
+    out = []
+    if any(not is_argo(i) for i in ids):
+        out.append(("glider_profiles", "glider"))
+    if any(is_argo(i) for i in ids):
+        out.append((argo_profiles_sql("{g:Array(String)}"), "argo"))
+    return out
+
+
 def _glider_rows(client, ids: list[str], base: dict, period: dict, diel: str, unit: str):
-    """(platforms, rows) for the listed glider deployments' fixes inside the circle."""
+    """(platforms, rows) for the listed glider deployments' and Argo floats'
+    fixes inside the circle."""
     if not ids:
         return [], []
-    # Deployments whose bounding box can reach the circle; the rows' own fixes decide.
+    # Deployments whose bounding box can reach the circle; the rows' own fixes
+    # decide. Argo floats skip this: their profile table is small.
     dlat = base["r"] / 111_320
     dlon = dlat / max(math.cos(math.radians(base["lat"])), 0.01)
+    gliders = [i for i in ids if not is_argo(i)]
     near = [r[0] for r in client.query(
         "SELECT deployment_id FROM glider_deployments FINAL WHERE deployment_id IN {ids:Array(String)} "
         "AND lat_max >= {la0:Float64} AND lat_min <= {la1:Float64} AND lon_max >= {lo0:Float64} AND lon_min <= {lo1:Float64}",
-        parameters={"ids": ids, "la0": base["lat"] - dlat, "la1": base["lat"] + dlat,
+        parameters={"ids": gliders, "la0": base["lat"] - dlat, "la1": base["lat"] + dlat,
                     "lo0": base["lon"] - dlon, "lo1": base["lon"] + dlon},
-    ).result_rows]
+    ).result_rows] if gliders else []
+    near += [i for i in ids if is_argo(i)]
     if not near:
         return [], []
     period_where, period_params = _period_sql("time", period)
-    rows = client.query(
-        f"SELECT deployment_id, {_BIN_SQL[unit].format(t='time')} AS b, "
-        "avg(value), min(value), max(value), count(), avg(depth) "
-        "FROM glider_profiles "
-        "WHERE deployment_id IN {g:Array(String)} AND variable = {v:String} AND NOT isNaN(value) "
-        f"AND depth BETWEEN {{d0:Float64}} AND {{d1:Float64}} AND {_circle_sql('latitude', 'longitude')} "
-        f"AND {period_where}{_diel_sql(diel, 'time', 'latitude', 'longitude')} "
-        "GROUP BY deployment_id, b",
-        parameters={**base, **period_params, "g": near},
-    ).result_rows
-    present = {r[0] for r in rows}
-    platforms = [{"id": g, "type": "glider", "name": g} for g in near if g in present]
+    platforms, rows = [], []
+    for table, kind in _moving_tables(near):
+        found = client.query(
+            f"SELECT deployment_id, {_BIN_SQL[unit].format(t='time')} AS b, "
+            "avg(value), min(value), max(value), count(), avg(depth) "
+            f"FROM {table} "
+            "WHERE deployment_id IN {g:Array(String)} AND variable = {v:String} AND NOT isNaN(value) "
+            f"AND depth BETWEEN {{d0:Float64}} AND {{d1:Float64}} AND {_circle_sql('latitude', 'longitude')} "
+            f"AND {period_where}{_diel_sql(diel, 'time', 'latitude', 'longitude')} "
+            "GROUP BY deployment_id, b",
+            parameters={**base, **period_params, "g": [i for i in near if is_argo(i) == (kind == "argo")]},
+        ).result_rows
+        present = {r[0] for r in found}
+        platforms += [{"id": g, "type": kind, "name": g} for g in near if g in present]
+        rows += found
     return platforms, rows
 
 
@@ -184,16 +204,18 @@ def _glider_samples(client, platforms: list[dict], base: dict, period: dict, die
     if not platforms:
         return
     period_where, period_params = _period_sql("time", period)
-    rows = client.query(
-        "SELECT deployment_id, groupArraySample({k:UInt32}, 1)((longitude, latitude, depth)) "
-        "FROM glider_profiles "
-        "WHERE deployment_id IN {g:Array(String)} AND variable = {v:String} AND NOT isNaN(value) "
-        f"AND depth BETWEEN {{d0:Float64}} AND {{d1:Float64}} AND {_circle_sql('latitude', 'longitude')} "
-        f"AND {period_where}{_diel_sql(diel, 'time', 'latitude', 'longitude')} "
-        "GROUP BY deployment_id",
-        parameters={**base, **period_params, "g": [p["id"] for p in platforms], "k": GLIDER_SAMPLES},
-    ).result_rows
-    found = {r[0]: r[1] for r in rows}
+    ids = [p["id"] for p in platforms]
+    found = {}
+    for table, kind in _moving_tables(ids):
+        found.update(client.query(
+            "SELECT deployment_id, groupArraySample({k:UInt32}, 1)((longitude, latitude, depth)) "
+            f"FROM {table} "
+            "WHERE deployment_id IN {g:Array(String)} AND variable = {v:String} AND NOT isNaN(value) "
+            f"AND depth BETWEEN {{d0:Float64}} AND {{d1:Float64}} AND {_circle_sql('latitude', 'longitude')} "
+            f"AND {period_where}{_diel_sql(diel, 'time', 'latitude', 'longitude')} "
+            "GROUP BY deployment_id",
+            parameters={**base, **period_params, "g": [i for i in ids if is_argo(i) == (kind == "argo")], "k": GLIDER_SAMPLES},
+        ).result_rows)
     for p in platforms:
         p["samples"] = [[round(float(lo), 5), round(float(la), 5), round(float(d), 1)] for lo, la, d in found.get(p["id"], [])]
 

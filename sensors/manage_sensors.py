@@ -375,6 +375,41 @@ CREATE TABLE IF NOT EXISTS default.ship_cast_values
 )
 ENGINE = MergeTree
 ORDER BY (cast_id, variable, depth);
+
+-- Argo float profiles in Canadian Pacific and Beaufort waters (argo_to_ch.py),
+-- from Ifremer's ArgoFloats and ArgoFloats-synthetic-BGC. A float drifts, so
+-- like casts each profile is its own row, and a float's track is its profiles in
+-- cycle order. A revised profile (newer date_update) is replaced.
+CREATE TABLE IF NOT EXISTS default.argo_profiles
+(
+    profile_id     String,
+    platform       LowCardinality(String),
+    cycle          UInt32,
+    direction      LowCardinality(String),
+    time           DateTime,
+    latitude       Float64,
+    longitude      Float64,
+    data_mode      LowCardinality(String),
+    project        LowCardinality(String),
+    pi             LowCardinality(String),
+    platform_type  LowCardinality(String),
+    max_depth      Float32,
+    variables      Array(LowCardinality(String)),
+    date_update    DateTime,
+    updated_at     DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY profile_id;
+
+CREATE TABLE IF NOT EXISTS default.argo_profile_values
+(
+    profile_id  String,
+    variable    LowCardinality(String),
+    depth       Float32                   CODEC(Gorilla(4),  ZSTD(4)),
+    value       Float32                   CODEC(Gorilla(4),  ZSTD(4))
+)
+ENGINE = MergeTree
+ORDER BY (profile_id, variable, depth);
 """
 
 
@@ -390,6 +425,8 @@ def cmd_setup(ch_client, _args):
     print("  default.glider_profiles")
     print("  default.ship_casts")
     print("  default.ship_cast_values")
+    print("  default.argo_profiles")
+    print("  default.argo_profile_values")
     key = ch_client.query(
         "SELECT sorting_key FROM system.tables WHERE database = 'default' AND name = 'sensor_timeseries'"
     ).result_rows[0][0]

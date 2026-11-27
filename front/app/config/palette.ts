@@ -39,7 +39,7 @@ export const chart = {
     outsidePeriod: 'rgba(19,22,26,0.62)',
     // One per instrument when a sensor's instruments are compared; the first
     // matches the single merged sensor line.
-    instruments: ['#5fb3d6', '#9ad08a', '#c9a0dc', '#e07a7a'],
+    instruments: ['#5fb3d6', '#9ad08a', '#c9a0dc', '#e07a7a', '#e3c46b'],
     fontSans: "'IBM Plex Sans', system-ui, sans-serif",
     fontMono: "'IBM Plex Mono', ui-monospace, monospace",
 } as const

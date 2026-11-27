@@ -27,6 +27,11 @@ git tags; the dates below are the last commit on each version branch.
   relative presets, months and seasons, ±N days around the map date (once or in every
   year), and day/night. Glider tracks are cut to the matching stretches, and Explore's
   timeseries greys out (and its CSV drops) sensor data outside it.
+- **Argo floats**: profiles in the Canadian Pacific (out to Station P) and Beaufort
+  Sea since 2001 (`argo_to_ch.py`, `/argo`), including BGC oxygen, nitrate, pH and
+  chlorophyll. An Argo tab beside Gliders lists the floats; each is a marker at its
+  latest fix, selecting one draws its track and opens its depth section in Explore, and
+  its profiles join the Area tab and the observation-period filter.
 - **Ship casts layer**: DFO IOS CTD and rosette-bottle casts (`ios_casts_to_ch.py`,
   `/casts`, `/castProfile`), clustered on the map for the observation period, with a
   vertical-profile drawer view of any variable's profile (incl. nutrients and chlorophyll) and the

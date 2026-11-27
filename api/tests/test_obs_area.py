@@ -110,3 +110,15 @@ def test_gliders_carry_sampled_fixes(monkeypatch):
     monkeypatch.setattr(obs_area, "get_ch_client", lambda: client)
     out = obs_area.obs_area("temperature", 49.2, -134.2, 30, 0, 500, glider_ids=["g1"], bin="day")
     assert out["platforms"][0]["samples"] == [[-134.2, 49.2, 50.0], [-134.21, 49.21, 120.0]]
+
+
+def test_argo_floats_read_their_own_tables_and_skip_the_glider_bbox(monkeypatch):
+    client = FakeClient({
+        "grouparraysample": [("argo-4902585", [(-134.5, 53.0, 10.0)])],
+        "from argo_profile_values": [("argo-4902585", datetime(2024, 3, 1), 7.1, 6.9, 7.3, 12, 40.0)],
+    })
+    monkeypatch.setattr(obs_area, "get_ch_client", lambda: client)
+    out = obs_area.obs_area("temperature", 53.0, -134.5, 100, 0, 100, glider_ids=["argo-4902585"], bin="day")
+    assert [(p["id"], p["type"]) for p in out["platforms"]] == [("argo-4902585", "argo")]
+    assert not any("glider_deployments" in q or "from glider_profiles" in q for q, _ in client.queries)
+    assert all(p["g"] == ["argo-4902585"] for q, p in client.queries if "argo_profile_values" in q)

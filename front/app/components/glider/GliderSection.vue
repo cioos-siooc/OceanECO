@@ -14,14 +14,14 @@
         title="Zoom back out to the whole deployment" @click="mainStore.setGliderRange(null)">Whole track</UButton>
       <UIcon v-if="loading" name="i-mdi-loading" class="animate-spin size-[14px] text-primary" />
       <div class="grow" />
-      <span v-if="glider" class="range-label oe-num">{{ glider.id }} · {{ rangeLabel }}</span>
+      <span v-if="glider" class="range-label oe-num">{{ name }} · {{ rangeLabel }}</span>
     </div>
 
     <UAlert v-if="loadError" color="error" variant="subtle" class="mb-2 shrink-0" :description="loadError" />
 
     <!-- A glider measures a handful of fields; anything else gets a pointer to what it does have. -->
     <div v-else-if="glider && !gliderHasVar" class="flex flex-col items-center justify-center grow text-center gap-2">
-      <div class="text-muted text-sm">{{ glider.id }} doesn't measure {{ variableLabel(varId) }}.</div>
+      <div class="text-muted text-sm">{{ name }} doesn't measure {{ variableLabel(varId) }}.</div>
       <div class="flex gap-1">
         <UButton v-for="v in glider.variables" :key="v" size="xs" variant="outline" @click="mainStore.selectVariable(v)">
           {{ variableLabel(v) }}
@@ -32,7 +32,7 @@
     <template v-else>
       <ChartContextBar :items="contextItems" />
       <div class="hm-slot">
-        <GliderSectionChart v-if="overview" :key="glider!.id" :label="`GLIDER · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
+        <GliderSectionChart v-if="overview" :key="glider!.id" :label="`${glider!.kind === 'argo' ? 'ARGO FLOAT' : 'GLIDER'} · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
           :overview="overview" :detail="detail" :extent="section!.extent" :range="mainStore.gliderRange"
           :rgb-fn="rgbFn" :x-label="xLabel" :tooltip-formatter="cellTooltip"
           @range="mainStore.setGliderRange($event)" />
@@ -52,7 +52,7 @@ import ChartContextBar, { type ContextItem } from '../ChartContextBar.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 
 /**
- * One C-PROOF glider deployment as a depth x profile section. The x-axis runs
+ * One C-PROOF glider deployment or Argo float (its cycles as profiles) as a depth x profile section. The x-axis runs
  * over profile numbers, labelled with their time or their distance along the
  * track — the glider moves, which is why this isn't Explore's time-binned view.
  * The whole deployment comes averaged to panel resolution; zooming in (the
@@ -65,6 +65,7 @@ const { variableLabel, toDisplayValue, formatDisplayValue } = useVariableRegistr
 const { rgbFn } = useFieldColorRamp()
 const glider = computed(() => mainStore.gliders.find(g => g.id === mainStore.selectedGliderId) ?? null)
 const varId = computed(() => mainStore.selected_variable.var)
+const name = computed(() => (glider.value?.kind === 'argo' ? `Float ${glider.value.glider}` : glider.value?.id ?? ''))
 const gliderHasVar = computed(() => !!glider.value?.variables.includes(varId.value))
 // Any tilt counts, however it got there: the button then flattens the map.
 const tilted = computed(() => (mainStore.mapView?.pitch ?? 0) > 10)
@@ -191,9 +192,9 @@ const contextItems = computed<ContextItem[]>(() => {
   const averaged = s && (s.perColumn > 1 || step > 1)
   return [
     { label: 'Field', value: variableLabel(varId.value) },
-    { label: 'Glider', value: `${g.id} · ${g.profiles} profiles · ${Math.round(g.distanceKm)} km` },
+    { label: g.kind === 'argo' ? 'Argo' : 'Glider', value: `${name.value} · ${g.profiles} profiles · ${Math.round(g.distanceKm)} km` },
     ...(averaged ? [{ label: 'Cell', value: `${s!.perColumn} profile${s!.perColumn > 1 ? 's' : ''} × ${step} m, averaged`, tone: 'muted' as const }] : []),
-    { label: 'Data', value: g.variant === 'grid' ? 'C-PROOF real-time, unscreened' : 'C-PROOF delayed mode', tone: 'muted' },
+    { label: 'Data', value: g.kind === 'argo' ? "Argo QC'd, adjusted where available" : g.variant === 'grid' ? 'C-PROOF real-time, unscreened' : 'C-PROOF delayed mode', tone: 'muted' },
   ]
 })
 </script>

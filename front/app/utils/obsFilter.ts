@@ -232,6 +232,8 @@ export function matchingIntervals(r: ResolvedObsFilter, t0: number, t1: number, 
  * keeps vertices that close; api/modules/gliders.py TRACK_MAX_STEP_S).
  */
 export const TRACK_GAP_S = 12 * 3600
+/** The same for an Argo float, which surfaces every ~10 days (longer under ice). */
+export const ARGO_GAP_S = 30 * 86400
 
 /**
  * The pieces of a timed track ([lon, lat, unix seconds], in time order) inside
@@ -240,11 +242,11 @@ export const TRACK_GAP_S = 12 * 3600
  * last real fix instead; a gap inside an interval splits its piece. A piece of
  * one fix is kept as two equal points so a brief match still shows.
  */
-export function clipTrack(track: number[][], intervals: Interval[]): [number, number][][] {
+export function clipTrack(track: number[][], intervals: Interval[], gapS = TRACK_GAP_S): [number, number][][] {
     const n = track.length
     if (n < 2) return []
     const ts = track.map(p => p[2]! * 1000)
-    const gap = TRACK_GAP_S * 1000
+    const gap = gapS * 1000
     const at = (i: number): [number, number] => [track[i]![0]!, track[i]![1]!]
     // Position at time t, between vertices i-1 and i.
     const lerp = (i: number, t: number): [number, number] => {

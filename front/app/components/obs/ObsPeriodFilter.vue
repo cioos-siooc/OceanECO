@@ -3,7 +3,7 @@
         <UButton
 variant="outline" color="neutral" size="xs" icon="i-mdi-calendar-range"
             class="w-full justify-start min-w-0" :class="active ? 'oe-on' : ''"
-            :title="`Observation period: ${summary}. Applies to sensors, gliders and ship casts; the model follows the map date.`"
+            :title="`Observation period: ${summary}. Applies to sensors, gliders, Argo floats and ship casts; the model follows the map date.`"
             aria-label="Observation period">
             <span class="truncate">{{ summary }}</span>
         </UButton>
@@ -15,7 +15,7 @@ variant="outline" color="neutral" size="xs" icon="i-mdi-calendar-range"
                     <UButton variant="ghost" size="xs" :disabled="!active" @click="reset">Reset</UButton>
                 </div>
                 <p class="text-xs text-muted">
-                    Which sensors, glider stretches and ship casts the map and list show. The model follows the map date.
+                    Which sensors, glider and Argo stretches and ship casts the map and list show. The model follows the map date.
                 </p>
 
                 <!-- Data per year, one row per kind; drag across it to pick years. -->
@@ -80,7 +80,7 @@ v-model="aroundDays" :min="0" :max="182" :step="1" size="xs" class="w-24"
 
                 <div class="text-xs text-muted oe-num">
                     {{ mainStore.castsTotal.toLocaleString('en-CA') }} casts · {{ mainStore.filteredSensors.length }} sensors ·
-                    {{ mainStore.filteredGliders.length }} gliders
+                    {{ gliderCount('glider') }} gliders · {{ gliderCount('argo') }} Argo floats
                 </div>
             </div>
         </template>
@@ -189,25 +189,26 @@ const diel = computed({
 })
 
 // ── coverage strip ────────────────────────────────────────────────────
-const ROWS = ['Gliders', 'Sensors', 'Casts'] as const
-const ROW_COLORS = [chartPalette.instruments[2], chartPalette.instruments[1], chartPalette.sensor]
+const ROWS = ['Argo', 'Gliders', 'Sensors', 'Casts'] as const
+const ROW_COLORS = [chartPalette.instruments[4], chartPalette.instruments[2], chartPalette.instruments[1], chartPalette.sensor]
+const gliderCount = (kind: string) => mainStore.filteredGliders.filter(g => g.kind === kind).length
 
 const perYear = computed(() => {
     const idx = new Map(years.value.map((y, i) => [y, i]))
     const counts = ROWS.map(() => years.value.map(() => 0))
     for (const c of mainStore.castYears) {
         const i = idx.get(c.year)
-        if (i != null) counts[2]![i] = c.ctd + c.bottle
+        if (i != null) counts[3]![i] = c.ctd + c.bottle
     }
     for (const s of mainStore.sensors) {
         const ys = new Set<number>()
         for (const m of s.members ?? [s]) for (const ym of mainStore.sensorCoverage[m.id] ?? []) ys.add(Math.floor(ym / 100))
-        for (const y of ys) { const i = idx.get(y); if (i != null) counts[1]![i]!++ }
+        for (const y of ys) { const i = idx.get(y); if (i != null) counts[2]![i]!++ }
     }
     for (const g of mainStore.gliders) {
         for (let y = new Date(g.start).getUTCFullYear(); y <= new Date(g.end).getUTCFullYear(); y++) {
             const i = idx.get(y)
-            if (i != null) counts[0]![i]!++
+            if (i != null) counts[g.kind === 'argo' ? 0 : 1]![i]!++
         }
     }
     return counts
@@ -330,7 +331,7 @@ onBeforeUnmount(() => strip?.dispose())
 
 .obs-period__strip {
     width: 100%;
-    height: 78px;
+    height: 97px;
 }
 
 .obs-period__row {

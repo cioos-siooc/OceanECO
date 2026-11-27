@@ -24,7 +24,7 @@ from modules.extractSensorTimeseries import extract_sensor_timeseries
 from modules.extract_depth_profile import extract_depth_profile
 from modules.extract_cross_section import extract_cross_section
 from modules.point_snapshot import extract_point_snapshot
-from modules.gliders import list_gliders, extract_glider_section
+from modules.gliders import list_gliders, list_argo, extract_glider_section
 from modules.ship_casts import cast_years, list_casts, cast_profile
 from modules.sensor_coverage import sensor_coverage
 from modules.obs_area import obs_area
@@ -257,6 +257,16 @@ async def get_gliders(request: Request):
         return _gzip_json(request, await run_in_threadpool(list_gliders))
     except Exception as exc:
         logger.exception("get_gliders failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/argo")
+async def get_argo(request: Request):
+    """Argo floats in Canadian Pacific and Beaufort waters, in /gliders' shape (id "argo-<WMO>")."""
+    try:
+        return _gzip_json(request, await run_in_threadpool(list_argo))
+    except Exception as exc:
+        logger.exception("get_argo failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

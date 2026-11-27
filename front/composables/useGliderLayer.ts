@@ -2,12 +2,12 @@ import type { Feature, FeatureCollection } from 'geojson';
 import { chart } from '@/config/palette';
 import type { GliderClip, GliderDeployment } from '@/stores/main';
 
-// C-PROOF glider deployments: a marker at each deployment's latest fix, cut to
-// the observation period when one is set. Only the selected and hovered
-// deployments draw their track: every track at once cluttered the map and
+// C-PROOF glider deployments and Argo floats: a marker at each one's latest
+// fix, cut to the observation period when one is set. Only the selected and
+// hovered ones draw their track: every track at once cluttered the map and
 // slowed panning and period changes. Sensor blue like every other observation;
-// a triangle (fixed sensors are squares, profilers diamonds) with the same
-// green live dot.
+// a glider is a triangle and a float an upright capsule (fixed sensors are
+// squares, profilers diamonds), with the same green live dot.
 const INK = '#d4d9de';
 const GROUND = '#13161a';
 const LIVE = '#5cc28a';
@@ -26,7 +26,6 @@ const LAYER_HEAD = 'glider-head';
 export const GLIDER_CLICK_LAYERS = [LAYER_TRACK, LAYER_HEAD];
 /** Bottom-most glider layer, for slotting the depth curtain under the tracks. */
 export const GLIDER_BASE_LAYER = LAYER_TRACK_CASING;
-const GLIDER_LAYER_IDS = [LAYER_TRACK_CASING, LAYER_TRACK, LAYER_TRACK_SELECTED, LAYER_TRACK_HOVER, LAYER_TRACK_RANGE, LAYER_HEAD];
 const SELECTED_OPACITY = 1;
 // The rest of the selected track, while its section is zoomed to a stretch of it.
 const SELECTED_DIMMED_OPACITY = 0.35;
@@ -34,16 +33,17 @@ const SELECTED_DIMMED_OPACITY = 0.35;
 const HOVER_OTHERS_OPACITY = 0.2;
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-const IMG = { live: 'glider-live', historic: 'glider-historic' } as const;
+const IMG = { live: 'glider-live', historic: 'glider-historic', argoLive: 'argo-live', argoHistoric: 'argo-historic' } as const;
 const NONE = ['==', ['get', 'id'], '__none__'];
 
-function makeTriangleSvg(live: boolean) {
-    const pts = '16,5 27,25 5,25';
-    const halo = `<polygon points="${pts}" fill="none" stroke="rgba(0,0,0,0.7)" stroke-width="4" stroke-linejoin="round"/>`;
-    const body = `<polygon points="${pts}" fill="${live ? chart.sensor : MUTED}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>`;
+function makeMarkerSvg(shape: string, live: boolean) {
+    const halo = shape.replace('/>', ' fill="none" stroke="rgba(0,0,0,0.7)" stroke-width="4" stroke-linejoin="round"/>');
+    const body = shape.replace('/>', ` fill="${live ? chart.sensor : MUTED}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>`);
     const dot = live ? `<circle cx="16" cy="19" r="4" fill="${LIVE}" stroke="${GROUND}" stroke-width="2"/>` : '';
     return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">${halo}${body}${dot}</svg>`;
 }
+const TRIANGLE = '<polygon points="16,5 27,25 5,25"/>';
+const CAPSULE = '<rect x="9.5" y="4" width="13" height="24" rx="6.5"/>';
 
 async function loadImage(map: any, id: string, svg: string, size: number): Promise<void> {
     if (map.hasImage(id)) return;
@@ -70,7 +70,7 @@ function buildGeoJSON(gliders: GliderDeployment[], clips: Record<string, GliderC
             type: 'FeatureCollection',
             features: lines.map(({ g, segments }) => ({
                 type: 'Feature',
-                properties: { id: g.id, active: g.active },
+                properties: { id: g.id, kind: g.kind, active: g.active },
                 geometry: { type: 'MultiLineString', coordinates: segments },
             })),
         },
@@ -82,7 +82,7 @@ function buildGeoJSON(gliders: GliderDeployment[], clips: Record<string, GliderC
                 return {
                     type: 'Feature',
                     // A head clipped short of the latest fix isn't "on mission now".
-                    properties: { id: g.id, active: g.active && (!clips || sameFix(last, g.track[g.track.length - 1]!)) },
+                    properties: { id: g.id, kind: g.kind, active: g.active && (!clips || sameFix(last, g.track[g.track.length - 1]!)) },
                     geometry: { type: 'Point', coordinates: [last[0], last[1]] },
                 };
             }),
@@ -125,8 +125,10 @@ export async function addGliderLayer(
     onClick: (id: string) => void,
 ): Promise<() => void> {
     await Promise.all([
-        loadImage(map, IMG.live, makeTriangleSvg(true), 32),
-        loadImage(map, IMG.historic, makeTriangleSvg(false), 32),
+        loadImage(map, IMG.live, makeMarkerSvg(TRIANGLE, true), 32),
+        loadImage(map, IMG.historic, makeMarkerSvg(TRIANGLE, false), 32),
+        loadImage(map, IMG.argoLive, makeMarkerSvg(CAPSULE, true), 32),
+        loadImage(map, IMG.argoHistoric, makeMarkerSvg(CAPSULE, false), 32),
     ]);
     const { tracks, heads } = buildGeoJSON(gliders, clips);
     allTracks = tracks.features;
@@ -172,7 +174,9 @@ export async function addGliderLayer(
         map.addLayer({
             id: LAYER_HEAD, type: 'symbol', source: SOURCE_HEADS,
             layout: {
-                'icon-image': ['case', ['get', 'active'], IMG.live, IMG.historic],
+                'icon-image': ['case', ['==', ['get', 'kind'], 'argo'],
+                    ['case', ['get', 'active'], IMG.argoLive, IMG.argoHistoric],
+                    ['case', ['get', 'active'], IMG.live, IMG.historic]],
                 'icon-size': ['interpolate', ['linear'], ['zoom'], 6, 0.85, 10, 1, 14, 1.25],
                 'icon-allow-overlap': true,
             },
@@ -211,12 +215,6 @@ export async function addGliderLayer(
             map.off('mouseleave', LAYER_HEAD, headLeave);
         } catch (e) { }
     };
-}
-
-export function setGliderLayerVisibility(map: any, visible: boolean) {
-    for (const id of GLIDER_LAYER_IDS) {
-        try { if (map?.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); } catch (e) { }
-    }
 }
 
 function applyOpacity(map: any) {

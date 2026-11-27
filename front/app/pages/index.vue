@@ -219,7 +219,7 @@ import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
 import { haversineM } from '@/utils/sensorMerge';
 import { addCastLayer, setCastLayerVisibility, setSelectedCast, CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
-import { addGliderLayer, setGliderTracks, setGliderLayerVisibility, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
+import { addGliderLayer, setGliderTracks, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
 import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, setAreaVolume, cameraForAreaVolume, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
 import { hexToRgb } from '~~/composables/useFieldColorRamp';
 import { chart } from '@/config/palette';
@@ -1225,26 +1225,40 @@ function clickSensor(sensor_id: string, depth: number) {
 }
 
 
+// Gliders and Argo floats share one layer; either list failing leaves the other.
 async function addGliders() {
-    const r = await axios.get(`${apiBaseUrl}/gliders`);
-    mainStore.setGliders(r.data);
-    const detach = await addGliderLayer(map, mainStore.filteredGliders, mainStore.gliderClips, (id) => {
+    const [gliders, argo] = await Promise.allSettled([
+        axios.get<Omit<GliderDeployment, 'kind'>[]>(`${apiBaseUrl}/gliders`),
+        axios.get<GliderDeployment[]>(`${apiBaseUrl}/argo`),
+    ]);
+    if (gliders.status === 'rejected') console.warn('gliders failed:', gliders.reason);
+    if (argo.status === 'rejected') console.warn('argo failed:', argo.reason);
+    mainStore.setGliders([
+        ...(gliders.status === 'fulfilled' ? gliders.value.data.map(g => ({ ...g, kind: 'glider' as const })) : []),
+        ...(argo.status === 'fulfilled' ? argo.value.data : []),
+    ]);
+    const detach = await addGliderLayer(map, mainStore.mapGliders, mainStore.gliderClips, (id) => {
         mainStore.setSelectedSensor(null);
         mainStore.selectGlider(id);
     });
     (map as any).__glidersDetach?.();
     (map as any).__glidersDetach = detach;
     setSelectedGlider(map, mainStore.selectedGliderId);
-    setGliderLayerVisibility(map, mainStore.showGliderLayer);
     updateGliderCurtain();
     updateGliderSeafloor();
 }
 
 // The observation period cuts every glider track to its matching stretches.
 watch(() => mainStore.gliderClips, (clips) => {
-    if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.filteredGliders, clips);
+    if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.mapGliders, clips);
     updateGliderCurtain();
 });
+
+/** Whether the selected deployment's kind (glider or Argo) is on the map. */
+function selectedGliderShown(): boolean {
+    const g = mainStore.gliders.find(d => d.id === mainStore.selectedGliderId);
+    return g?.kind === 'argo' ? mainStore.showArgoLayer : mainStore.showGliderLayer;
+}
 
 // DFO IOS ship casts matching the observation period (mainStore.obsFilter),
 // re-fetched whenever it changes. Day/night needs the sun at each cast, so it
@@ -1325,7 +1339,7 @@ async function updateGliderCurtain() {
             values: s.values.map(row => row.map(x => x == null ? null : toDisplayValue(v, x))),
             rgb: fieldRgbFn.value,
         }, GLIDER_BASE_LAYER);
-        setGliderCurtainVisibility(map, mainStore.showGliderLayer);
+        setGliderCurtainVisibility(map, selectedGliderShown());
     } catch (e) {
         console.warn('glider curtain failed:', e);
     }
@@ -1359,7 +1373,7 @@ async function updateGliderSeafloor() {
         if (seq !== seafloorSeq) return;
         seafloorDeepestM = grid.depth.reduce((a, d) => (d > a ? d : a), 0);
         setGliderSeafloor(map, grid, GLIDER_BASE_LAYER);
-        setGliderCurtainVisibility(map, mainStore.showGliderLayer);
+        setGliderCurtainVisibility(map, selectedGliderShown());
         setGliderSeafloorVisibility(map, mainStore.showSeafloor);
     } catch (e) {
         console.warn('glider seafloor failed:', e);
@@ -1429,9 +1443,9 @@ watch(() => mainStore.selectedGliderId, (id) => {
     }
 });
 watch(() => mainStore.hoveredGliderId, (id) => setHoveredGlider(map, id));
-watch(() => mainStore.showGliderLayer, (visible: boolean) => {
-    setGliderLayerVisibility(map, visible);
-    setGliderCurtainVisibility(map, visible);
+watch([() => mainStore.showGliderLayer, () => mainStore.showArgoLayer], () => {
+    if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.mapGliders, mainStore.gliderClips);
+    setGliderCurtainVisibility(map, selectedGliderShown());
 });
 
 async function getSensors() {

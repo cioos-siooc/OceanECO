@@ -1,4 +1,5 @@
-"""C-PROOF glider deployments, harvested by sensors/cproof_to_ch.py.
+"""C-PROOF glider deployments (sensors/cproof_to_ch.py) and Argo floats
+(sensors/argo_to_ch.py).
 
 A deployment is a moving profiler: every profile carries its own fix, so its
 data lives in `glider_profiles` rather than `sensor_timeseries`, and the map
@@ -10,10 +11,15 @@ column grid in the shape `glider/GliderSectionChart.vue` takes: a window of the
 deployment's profiles (all of them by default), averaged into at most
 MAX_COLUMNS x MAX_ROWS cells, plus each column's time, position and
 along-track distance.
+
+An Argo float is served as a deployment too, with id "argo-<WMO>" and its
+cycles as profiles (`argo_profiles_sql`), so the map, section and Area code
+treat both alike. `list_argo()` lists the floats in `list_gliders()`' shape.
 """
 from __future__ import annotations
 
 import math
+import time
 from bisect import bisect_left, bisect_right
 
 import numpy as np
@@ -33,6 +39,30 @@ TRACK_TOLERANCE_DEG = 0.002
 # Longest step between kept track vertices that isn't a gap in the data; the
 # frontend's obsFilter.ts TRACK_GAP_S must match.
 TRACK_MAX_STEP_S = 12 * 3600
+
+
+ARGO_PREFIX = "argo-"
+# A float is live while its last profile is this recent (it surfaces every ~10 days).
+ARGO_LIVE_DAYS = 30
+
+
+def is_argo(deployment_id: str) -> bool:
+    return deployment_id.startswith(ARGO_PREFIX)
+
+
+def argo_profiles_sql(ids: str) -> str:
+    """Argo values in glider_profiles' columns, as a subquery, for the float
+    ids ("argo-<WMO>") in the SQL array `ids` (a parameter or literal). The
+    values are read through their own primary key, never scanned whole."""
+    in_ids = f"concat('{ARGO_PREFIX}', platform) IN {ids}"
+    return (
+        f"(SELECT concat('{ARGO_PREFIX}', p.platform) AS deployment_id, p.cycle AS profile, p.time AS time, "
+        "p.latitude AS latitude, p.longitude AS longitude, v.variable AS variable, v.depth AS depth, v.value AS value "
+        "FROM argo_profile_values AS v INNER JOIN ("
+        f"SELECT profile_id, platform, cycle, time, latitude, longitude FROM argo_profiles FINAL WHERE {in_ids}"
+        ") AS p USING profile_id "
+        f"WHERE v.profile_id IN (SELECT profile_id FROM argo_profiles WHERE {in_ids}))"
+    )
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -142,6 +172,60 @@ def list_gliders() -> list[dict]:
     return out
 
 
+def _fill_vertical_gaps(grid: np.ndarray) -> None:
+    """Interpolate each column's empty rows between its shallowest and deepest
+    value, in place. Argo samples every 1-2 dbar near the surface but only
+    every 10-50 dbar at depth, so uniform rows leave stripes there."""
+    rows = np.arange(grid.shape[0])
+    for c in range(grid.shape[1]):
+        col = grid[:, c]
+        ok = ~np.isnan(col)
+        if ok.sum() > 1:
+            inside = (rows > rows[ok][0]) & (rows < rows[ok][-1]) & ~ok
+            col[inside] = np.interp(rows[inside], rows[ok], col[ok])
+
+
+@cached(TTLCache(maxsize=1, ttl=300))
+def list_argo() -> list[dict]:
+    """Every Argo float in `list_gliders()`' shape, its track one fix per profile."""
+    client = get_ch_client()
+    try:
+        rows = client.query("""
+            SELECT platform, any(platform_type), any(project), any(pi), min(time), max(time),
+                   min(latitude), max(latitude), min(longitude), max(longitude), count(),
+                   groupUniqArrayArray(variables),
+                   arraySort(x -> x.3, groupArray((longitude, latitude, toUnixTimestamp(time))))
+            FROM argo_profiles FINAL
+            GROUP BY platform
+            ORDER BY max(time) DESC
+        """).result_rows
+    finally:
+        client.close()
+    live_after = time.time() - ARGO_LIVE_DAYS * 86400
+    out = []
+    for (wmo, platform, project, pi, start, end, lat0, lat1, lon0, lon1, n, variables, track) in rows:
+        dist = sum(_haversine_km(a[1], a[0], b[1], b[0]) for a, b in zip(track, track[1:]))
+        out.append({
+            "id": f"{ARGO_PREFIX}{wmo}",
+            "kind": "argo",
+            "glider": wmo,
+            "platformType": platform,
+            "summary": " · ".join(x for x in (project, pi and f"PI {pi.title()}") if x),
+            "station": "",
+            "start": _iso(start),
+            "end": _iso(end),
+            "bbox": [lon0, lat0, lon1, lat1],
+            "profiles": int(n),
+            "distanceKm": round(dist, 1),
+            "variables": sorted(variables),
+            "fileUrl": f"https://fleetmonitoring.euro-argo.eu/float/{wmo}",
+            "variant": "",
+            "active": track[-1][2] >= live_after,
+            "track": [[round(lon, 5), round(lat, 5), int(t)] for lon, lat, t in track],
+        })
+    return out
+
+
 def extract_glider_section(deployment_id: str, var: str,
                            start: int | None = None, end: int | None = None) -> dict:
     """One variable of one deployment as a depth x column grid.
@@ -159,11 +243,12 @@ def extract_glider_section(deployment_id: str, var: str,
     """
     client = get_ch_client()
     params = {"d": deployment_id, "v": var}
+    table = argo_profiles_sql("[{d:String}]") if is_argo(deployment_id) else "glider_profiles"
     meta = client.query(
-        """
+        f"""
         SELECT profile, any(time), any(latitude), any(longitude)
-        FROM glider_profiles
-        WHERE deployment_id = {d:String} AND variable = {v:String}
+        FROM {table}
+        WHERE deployment_id = {{d:String}} AND variable = {{v:String}}
         GROUP BY profile
         ORDER BY profile
         """,
@@ -189,10 +274,10 @@ def extract_glider_section(deployment_id: str, var: str,
     col_of = [(i - i0) // per_col for i in range(i0, i1)]
 
     d_min, d_max, n_depths = client.query(
-        """
+        f"""
         SELECT min(depth), max(depth), uniqExact(depth)
-        FROM glider_profiles
-        WHERE deployment_id = {d:String} AND variable = {v:String}
+        FROM {table}
+        WHERE deployment_id = {{d:String}} AND variable = {{v:String}}
         """,
         parameters=params,
     ).first_row
@@ -203,13 +288,13 @@ def extract_glider_section(deployment_id: str, var: str,
 
     grid = np.full((n_rows, len(col_starts)), np.nan)
     for c, r, v in client.query(
-        """
-        SELECT transform(profile, {ps:Array(UInt32)}, {cs:Array(UInt32)}, 0) AS c,
-               toUInt32(floor((depth - {d0:Float64}) / {step:Float64} + 1e-6)) AS r,
+        f"""
+        SELECT transform(profile, {{ps:Array(UInt32)}}, {{cs:Array(UInt32)}}, 0) AS c,
+               toUInt32(floor((depth - {{d0:Float64}}) / {{step:Float64}} + 1e-6)) AS r,
                avg(value)
-        FROM glider_profiles
-        WHERE deployment_id = {d:String} AND variable = {v:String}
-          AND profile BETWEEN {p0:UInt32} AND {p1:UInt32}
+        FROM {table}
+        WHERE deployment_id = {{d:String}} AND variable = {{v:String}}
+          AND profile BETWEEN {{p0:UInt32}} AND {{p1:UInt32}}
           AND isFinite(value)
         GROUP BY c, r
         """,
@@ -218,6 +303,9 @@ def extract_glider_section(deployment_id: str, var: str,
     ).result_rows:
         if r < n_rows:
             grid[r, c] = v
+
+    if is_argo(deployment_id):
+        _fill_vertical_gaps(grid)
 
     mids = [(a + min(a + per_col, i1) - 1) // 2 for a in col_starts]
     return {

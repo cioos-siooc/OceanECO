@@ -51,6 +51,7 @@ for field users. Share links already carry the view.
 ## Later / ideas
 
 - **IOS ship casts on a schedule** — `ios_casts_to_ch.py` is CLI-only; a weekly Prefect flow running `--since <last year>` would pick up new casts. The first full-archive load (~124k casts) has to run by hand.
+- **Argo on a schedule** — `argo_to_ch.py` is CLI-only; a weekly flow running `--since <last year>` would pick up new profiles and their delayed-mode revisions. The first full load (~2 h) has to run by hand.
 - **Per-deployment colours in a merged sensor's series** — a merge plots as one line today; colouring by member (the data is in `members`) would show where one deployment ends and the next begins.
 - **DFO MEDS buoys** — `catalog_dfo_meds.yml` is imported but every entry is `inactive`, so `/sensors` hides them; mark them `archive: true` instead to show their history without hourly polling.
 

@@ -243,7 +243,17 @@ uv run python ios_casts_to_ch.py --dataset IOS_CTD_Profiles   # the whole archiv
 uv run python ios_casts_to_ch.py --since 2024                 # pick up new casts
 ```
 
-Running any harvester from a host shell rather than the container: set `TZ=UTC` for `erddap_to_ch.py`/`onc_to_ch.py`. `clickhouse-connect` reads their naive-UTC datetimes as local time, so on a non-UTC host every row shifts by the offset. `ios_casts_to_ch.py` writes aware UTC and doesn't need it.
+### Argo floats (Ifremer ERDDAP)
+
+Argo profiles in the Canadian Pacific (45–60°N, 150–122°W, out to Station P) and Beaufort (66–80°N, 160–120°W) go to `argo_profiles` + `argo_profile_values` (`manage_sensors.py setup` creates them). Core temperature/salinity and BGC oxygen, nitrate, pH and chlorophyll are merged per profile, keeping Argo's good QC flags (1, 2, 5, 8; `_adjusted` values for delayed/adjusted-mode core and all BGC). A run skips profiles it holds unless their `date_update` moved on (real-time → delayed mode), so re-running a period refreshes it. CLI only, no Prefect flow yet:
+
+```bash
+uv run python argo_to_ch.py                  # the whole archive since 1999 (~2 h, ~0.5 GB)
+uv run python argo_to_ch.py --since 2025     # new and revised profiles
+uv run python argo_to_ch.py --region beaufort --year 2015
+```
+
+Running any harvester from a host shell rather than the container: set `TZ=UTC` for `erddap_to_ch.py`/`onc_to_ch.py`. `clickhouse-connect` reads their naive-UTC datetimes as local time, so on a non-UTC host every row shifts by the offset. `ios_casts_to_ch.py` and `argo_to_ch.py` write aware UTC and don't need it.
 
 ---
 

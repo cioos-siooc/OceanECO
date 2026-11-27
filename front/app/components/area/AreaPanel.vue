@@ -4,7 +4,7 @@
     <div v-if="!area" class="flex flex-col items-center justify-center grow text-center px-6">
       <UIcon name="i-mdi-circle-outline" class="size-[56px] text-gray-500" />
       <div class="text-gray-500 mt-2">
-        Press and drag on the map to draw a circle: every visible sensor, glider and ship cast inside it,
+        Press and drag on the map to draw a circle: every visible sensor, glider, Argo float and ship cast inside it,
         within the depth range and observation period, comes together here. A click places a 5 km circle.
       </div>
     </div>
@@ -95,11 +95,11 @@ import ChartContextBar, { type ContextItem } from '../ChartContextBar.vue'
 import DownloadButton from '../ui/DownloadButton.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 
-type PlatformType = 'sensor' | 'glider' | 'ctd' | 'bottle'
+type PlatformType = 'sensor' | 'glider' | 'argo' | 'ctd' | 'bottle'
 type Bin = 'hour' | 'day' | 'week' | 'month' | 'year'
 interface Platform {
   id: string, type: PlatformType, name: string, lat?: number, lon?: number, depth?: number | null, distanceKm?: number
-  samples?: [number, number, number][]   // a glider's (lon, lat, depth) fixes in the box
+  samples?: [number, number, number][]   // a glider's or float's (lon, lat, depth) fixes in the box
 }
 interface AreaResponse {
   variable: string
@@ -221,13 +221,13 @@ watch([requestKey, () => props.active], () => {
 
 // ── Derived series ──────────────────────────────────────────────────────────
 const TYPE_LABEL: Record<PlatformType, string> = {
-  sensor: 'Moorings & sensors', glider: 'Gliders', ctd: 'CTD casts', bottle: 'Bottle casts',
+  sensor: 'Moorings & sensors', glider: 'Gliders', argo: 'Argo floats', ctd: 'CTD casts', bottle: 'Bottle casts',
 }
-// As in the observation-period strip: sensors, gliders, then casts.
+// As in the observation-period strip: sensors, gliders, Argo, then casts.
 const TYPE_COLOR: Record<PlatformType, string> = {
-  sensor: palette.instruments[1], glider: palette.instruments[2], ctd: palette.sensor, bottle: palette.instruments[3],
+  sensor: palette.instruments[1], glider: palette.instruments[2], argo: palette.instruments[4], ctd: palette.sensor, bottle: palette.instruments[3],
 }
-const TYPES: PlatformType[] = ['sensor', 'glider', 'ctd', 'bottle']
+const TYPES: PlatformType[] = ['sensor', 'glider', 'argo', 'ctd', 'bottle']
 
 const tilted = computed(() => (mainStore.mapView?.pitch ?? 0) > 10)
 
@@ -259,7 +259,7 @@ watch(data, (d) => {
 onBeforeUnmount(() => mainStore.setObsAreaMarkers([]))
 
 const counts = computed(() => {
-  const c: Record<PlatformType, number> = { sensor: 0, glider: 0, ctd: 0, bottle: 0 }
+  const c: Record<PlatformType, number> = { sensor: 0, glider: 0, argo: 0, ctd: 0, bottle: 0 }
   for (const p of data.value?.platforms ?? []) c[p.type]++
   return c
 })
@@ -329,6 +329,7 @@ const sourcesLabel = computed(() => {
   const parts: string[] = []
   if (c.sensor) parts.push(`${c.sensor} sensor${c.sensor === 1 ? '' : 's'}`)
   if (c.glider) parts.push(`${c.glider} glider${c.glider === 1 ? '' : 's'}`)
+  if (c.argo) parts.push(`${c.argo} Argo float${c.argo === 1 ? '' : 's'}`)
   const casts = c.ctd + c.bottle
   if (casts) parts.push(`${casts.toLocaleString('en-CA')} cast${casts === 1 ? '' : 's'}`)
   return parts.join(' · ') || 'none'
@@ -337,6 +338,7 @@ const hiddenLayers = computed(() => {
   const off: string[] = []
   if (!mainStore.showSensorLayer) off.push('sensors')
   if (!mainStore.showGliderLayer) off.push('gliders')
+  if (!mainStore.showArgoLayer) off.push('Argo floats')
   if (!mainStore.showCastLayer) off.push('casts')
   return off
 })
@@ -376,6 +378,7 @@ const timeFmt = (ms: number, unit: Bin) => {
 
 function platformLabel(p: Platform): string {
   if (p.type === 'ctd' || p.type === 'bottle') return `${p.type === 'ctd' ? 'CTD' : 'Bottle'} cast · ${p.name}`
+  if (p.type === 'argo') return `Argo float ${p.name.replace('argo-', '')}`
   return p.name
 }
 
@@ -533,7 +536,7 @@ csvExport.register((): CsvDataset[] => {
       rows: d.points.time.map((t, i) => {
         const p = d.platforms[d.points.platform[i]!]!
         return {
-          type: p.type, platform: p.type === 'sensor' || p.type === 'glider' ? p.name : p.id,
+          type: p.type, platform: p.type === 'sensor' || p.type === 'glider' || p.type === 'argo' ? p.name : p.id,
           lat: p.lat, lon: p.lon, time: csvTimestamp(t), depth: d.points.depth[i],
           value: show(v, d.points.value[i]!), min: show(v, d.points.min[i]!), max: show(v, d.points.max[i]!), n: d.points.n[i],
         }
