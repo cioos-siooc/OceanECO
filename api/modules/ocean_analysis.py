@@ -13,7 +13,7 @@ import logging
 from typing import List, Tuple
 
 from modules.clickhouse_helpers import get_ch_client as _get_ch_client
-from modules.extractTimeseries import ALLOWED_VARIABLES
+from modules.extractTimeseries import ALLOWED_VARIABLES, _find_nearest_grid_point
 
 DAILY_STATS = {"mean", "min", "max"}
 
@@ -21,25 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 def lookup_nearest_grid_cell(lat: float, lon: float) -> List[Tuple[int, int]]:
-    """
-    Returns the single (gridX, gridY) tuple whose coordinate is closest
-    to the given (lat, lon), using great-circle distance via ClickHouse's
-    geoDistance function.
-    """
-    client = _get_ch_client()
-    # 0.5-degree bounding box pre-filters the full-table scan to ~1% of rows
-    # before the geoDistance sort. Safe because the Salish Sea grid spacing is
-    # well under 0.5°, so the true nearest cell is always inside the box.
-    query = f"""
-        SELECT gridX, gridY
-        FROM grid_SSC
-        WHERE latitude BETWEEN {lat - 0.5} AND {lat + 0.5}
-          AND longitude BETWEEN {lon - 0.5} AND {lon + 0.5}
-        ORDER BY geoDistance({lon}, {lat}, longitude, latitude)
-        LIMIT 1
-    """
-    result = client.query(query)
-    return result.result_rows
+    """The nearest (gridX, gridY), as a one-item list. Uses the shared lookup,
+    so a point farther than MAX_GRID_DIST_KM from the model raises
+    OutsideDomainError, as on every other point endpoint."""
+    grid_x, grid_y, _, _, _ = _find_nearest_grid_point(_get_ch_client(), "grid_SSC", lat, lon)
+    return [(grid_x, grid_y)]
 
 
 def lookup_grid_cells_for_polygon(polygon_coords: List[Tuple[float, float]]) -> List[Tuple[int, int]]:

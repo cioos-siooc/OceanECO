@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional, Tuple
 from functools import partial
 from contextlib import asynccontextmanager
+import hmac
 import os
 import logging
 import asyncio
@@ -1115,11 +1116,6 @@ async def analysis_timeseries(request: AnalysisRequest):
                 lat=request.lat,
                 lon=request.lon
             )
-            if not grid_points:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No marine grid cell found near the selected point."
-                )
 
         result = await run_in_threadpool(
             query_region_timeseries,
@@ -1134,6 +1130,8 @@ async def analysis_timeseries(request: AnalysisRequest):
 
     except HTTPException:
         raise
+    except OutsideDomainError as exc:
+        return _outside_domain_response(exc)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -1158,7 +1156,7 @@ async def sync_hourly(request: SyncHourlyRequest, authorization: Optional[str] =
     file path is derived server-side from SSC_SYNC_STAGING_DIR, never taken
     from the request, to avoid trusting a caller-supplied path.
     """
-    if not SYNC_API_TOKEN or authorization != f"Bearer {SYNC_API_TOKEN}":
+    if not SYNC_API_TOKEN or not hmac.compare_digest((authorization or "").encode(), f"Bearer {SYNC_API_TOKEN}".encode()):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     try:
@@ -1183,7 +1181,7 @@ async def sync_daily(request: SyncHourlyRequest, authorization: Optional[str] = 
     (never caller-supplied) staging path, but against the daily mean/min/max
     table and its own sync log.
     """
-    if not SYNC_API_TOKEN or authorization != f"Bearer {SYNC_API_TOKEN}":
+    if not SYNC_API_TOKEN or not hmac.compare_digest((authorization or "").encode(), f"Bearer {SYNC_API_TOKEN}".encode()):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     try:

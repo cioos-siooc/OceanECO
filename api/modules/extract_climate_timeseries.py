@@ -48,12 +48,7 @@ def extract_climate_timeseries(lat, lon, variable, depth, from_date, to_date, bi
 
     client = _get_ch_client()
 
-    # Nearest grid cell. Routed through extractTimeseries's shared lookup rather
-    # than ocean_analysis's `lookup_nearest_grid_cell`, which has no distance
-    # guard: past its 0.5-degree prefilter box it simply returned no rows, which
-    # became "returned None" and a 500 for a user who had merely clicked outside
-    # the model. The shared helper raises OutsideDomainError instead, which
-    # SERVER.py renders as the same structured 400 every other endpoint sends.
+    # Nearest grid cell; raises OutsideDomainError, which SERVER.py renders as a 400.
     grid_x, grid_y, _, _, _ = _find_nearest_grid_point(client, "grid_SSC", lat, lon)
 
     # Resolve nearest available depth
