@@ -9,7 +9,7 @@ detailed designs live in [notes/](notes/).
 Draw an area (not just a Cross-Section line) and get area-averaged timeseries plus exposure stats,
 e.g. % of area with Ω aragonite < 1 or DO below hypoxic thresholds. Shellfish tenures, MPAs and
 inlets are areas, so this is the most management-relevant gap.
-- Reuse: mapbox-gl-draw wiring from Cross-Section (`index.vue`), `shared/grid_lookup.py` for cell selection.
+- Reuse: mapbox-gl-draw wiring from Cross-Section (`useMapDrawTools.ts`), `shared/grid_lookup.py` for cell selection.
 
 ### Area tab: more views
 The observation box (`area/AreaPanel.vue`, `/obsArea`) has Points and Mean. Next: a monthly
@@ -37,7 +37,7 @@ optional per-site email/RSS subscriptions.
 
 ### Map animation export (MP4/GIF)
 Render the time animation of a variable over a window as a clip, for outreach and case studies.
-- Reuse: existing time-animation loop in `index.vue` and value-packed tiles.
+- Reuse: existing time-animation loop in `TimeControls.vue` and value-packed tiles.
 
 ### Model-skill scorecard
 Bias / RMSE / correlation for every in-domain sensor × variable, as a table and as colour on the
