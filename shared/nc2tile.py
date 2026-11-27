@@ -572,6 +572,11 @@ def _process_task(task: Tuple) -> Tuple[str, str]:
 
     out_png = os.path.join(png_dir, fname)
 
+    # NetCDF slices are (gridY, gridX), but a grid cache built from grid_SSC is
+    # (gridX, gridY) — the orientation render_tile_from_db relies on — so match it.
+    if tslice_vals.shape != lon_src.shape and tslice_vals.shape == lon_src.shape[::-1]:
+        tslice_vals, src_valid = tslice_vals.T, src_valid.T
+
     _render_tile_core(
         lon_src, lat_src, tslice_vals, src_valid, xx_merc, yy_merc, w, h,
         vmin, vmax, erddap_min, erddap_max, method, clip, pack_precision, out_png,

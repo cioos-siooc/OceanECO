@@ -8,13 +8,11 @@ dependencies = [
     "clickhouse-connect>=1.1.1",
     "ipython>=9.11.0",
     "matplotlib>=3.10.8",
+    "netcdf4>=1.7.4",
     "numpy>=2.4.3",
     "opencv-python-headless>=4.13.0.92",
+    "pandas>=3.0.2",
     "pillow>=12.1.1",
     "rasterio>=1.5.0",
-]
-
-[tool.uv.workspace]
-members = [
-    "standalone_nc2tile",
+    "xarray>=2026.2.0",
 ]
