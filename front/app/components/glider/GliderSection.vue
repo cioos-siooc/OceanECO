@@ -34,15 +34,15 @@
       <div class="hm-slot">
         <GliderSectionChart v-if="overview" :key="glider!.id" :label="`${glider!.kind === 'argo' ? 'ARGO FLOAT' : 'GLIDER'} · ${xAxis === 'time' ? 'BY TIME' : 'ALONG TRACK'}`"
           :overview="overview" :detail="detail" :extent="section!.extent" :range="mainStore.gliderRange"
-          :rgb-fn="rgbFn" :x-label="xLabel" :tooltip-formatter="cellTooltip"
-          @range="mainStore.setGliderRange($event)" />
+          :rgb-fn="rgbFn" :x-label="xLabel" :tooltip-formatter="cellTooltip" :marks="mainStore.gliderPins"
+          @range="mainStore.setGliderRange($event)" @pick="(p, add) => mainStore.pinGliderProfile(p, add)" @hover="onHover" />
       </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useMainStore } from '~/stores/main'
 import { useVariableRegistry } from '~~/composables/useVariableRegistry'
 import { useFieldColorRamp } from '~~/composables/useFieldColorRamp'
@@ -183,6 +183,22 @@ function cellTooltip(layer: SectionLayer, col: number, row: number, value: numbe
     + `<div style="opacity:.7;margin-bottom:2px;">${s.lat[col]!.toFixed(3)}°N ${Math.abs(s.lon[col]!).toFixed(3)}°W &middot; ${s.distanceKm[col]!.toFixed(1)} km along track &middot; ${profiles}</div>`
     + `<div>${variableLabel(varId.value)}: <b>${valueStr}</b></div>`
 }
+
+// The column under the cursor, previewed in the profile drawer from the
+// section's own (averaged) values: no request, so it keeps up with the mouse.
+function onHover(cell: { layer: SectionLayer, col: number } | null) {
+  if (!cell) { mainStore.setGliderHover(null); return }
+  const s = sourceOf(cell.layer)
+  const p0 = s.profiles[cell.col]!, p1 = s.profileEnd[cell.col]!
+  mainStore.setGliderHover({
+    label: `${fmtDate(s.time[cell.col]!, true)} UTC · ${p1 > p0 ? `profiles ${p0}–${p1}` : `profile ${p0}`}`,
+    lon: s.lon[cell.col]!,
+    lat: s.lat[cell.col]!,
+    depths: cell.layer.depths,
+    values: cell.layer.values.map(row => row[cell.col] ?? null),
+  })
+}
+onBeforeUnmount(() => mainStore.setGliderHover(null))
 
 const contextItems = computed<ContextItem[]>(() => {
   const g = glider.value

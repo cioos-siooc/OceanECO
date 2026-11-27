@@ -84,6 +84,29 @@ export interface GliderDeployment {
     track: [number, number, number][]
 }
 
+/** A profile pinned from the glider/Argo section into the profile drawer. Its
+ *  colour stays with it (section tick, map dot, line) until it is unpinned. */
+export interface GliderPin {
+    profile: number
+    color: string
+    /** Where and when it was taken, once its data has loaded. */
+    fix?: { lon: number, lat: number, time: string }
+}
+
+/** The section column under the cursor, drawn as a dashed preview in the drawer. */
+export interface GliderHoverProfile {
+    label: string
+    /** The column's (middle profile's) position, ringed on the map. */
+    lon: number
+    lat: number
+    depths: number[]
+    /** Display units, as the section shows them. */
+    values: (number | null)[]
+}
+
+/** Pin colours, one per pinned profile; also the most that can be compared at once. */
+export const GLIDER_PIN_COLORS = chartPalette.instruments;
+
 /** A glider deployment's track cut to the observation period. */
 export interface GliderClip {
     segments: [number, number][][]
@@ -185,6 +208,10 @@ function createInitialState() {
         gliders: [] as GliderDeployment[],
         selectedGliderId: null as string | null,
         hoveredGliderId: null as string | null,
+        // Profiles of the selected glider/float pinned into the profile drawer
+        // (click the section; Shift-click to compare), and the column under the cursor.
+        gliderPins: [] as GliderPin[],
+        gliderHover: null as GliderHoverProfile | null,
         // Profile-number window [first, last] the glider section is zoomed to;
         // null = the whole deployment. The map highlights that stretch of the
         // track and the curtain shows only it.
@@ -580,7 +607,11 @@ export const useMainStore = defineStore('main', {
         /** Select a glider deployment (or clear with null) and show its section. */
         selectGlider(id: string | null) {
             if (id && id !== this.selectedGliderId) trackEvent('glider_selected', { deployment: id });
-            if (id !== this.selectedGliderId) this.gliderRange = null;
+            if (id !== this.selectedGliderId) {
+                this.gliderRange = null;
+                this.gliderPins = [];
+                this.gliderHover = null;
+            }
             this.selectedGliderId = id;
             if (id) {
                 if (this.selectedCastId) this.selectedCastId = null;
@@ -588,6 +619,37 @@ export const useMainStore = defineStore('main', {
                 if (this.activeBottomTab !== 'explore') this.setActiveBottomTab('explore');
             }
             else if (this.exploreView === 'glider') this.setExploreView('series');
+        },
+        /**
+         * Pin `profile` into the profile drawer: replacing the pins, or with
+         * `add` (Shift-click) beside them, where pinning one already pinned
+         * unpins it. Past GLIDER_PIN_COLORS.length the oldest goes.
+         */
+        pinGliderProfile(profile: number, add = false) {
+            const pins = this.gliderPins;
+            const existing = pins.find(p => p.profile === profile);
+            if (!add) {
+                this.gliderPins = [existing ?? { profile, color: GLIDER_PIN_COLORS[0]! }];
+            } else if (existing) {
+                this.gliderPins = pins.filter(p => p !== existing);
+            } else {
+                const kept = pins.slice(-(GLIDER_PIN_COLORS.length - 1));
+                const color = GLIDER_PIN_COLORS.find(c => !kept.some(p => p.color === c))!;
+                this.gliderPins = [...kept, { profile, color }];
+            }
+            this.isVerticalProfileOpen = true;
+        },
+        unpinGliderProfile(profile: number) {
+            this.gliderPins = this.gliderPins.filter(p => p.profile !== profile);
+        },
+        clearGliderPins() {
+            this.gliderPins = [];
+        },
+        setGliderPinFix(profile: number, fix: GliderPin['fix']) {
+            this.gliderPins = this.gliderPins.map(p => (p.profile === profile ? { ...p, fix } : p));
+        },
+        setGliderHover(hover: GliderHoverProfile | null) {
+            this.gliderHover = hover ? markRaw(hover) : null;
         },
         setGliderRange(range: [number, number] | null) {
             this.gliderRange = range;

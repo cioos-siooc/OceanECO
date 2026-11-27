@@ -4,8 +4,10 @@
         <!-- A selected ship cast takes the drawer over: it is a vertical profile
              too, and the model's own one is overlaid on it there. -->
         <CastProfile v-if="castMode" class="h-full" @close="mainStore.selectCast(null)" />
+        <!-- So does a glider or Argo float: its profiles are picked from its section. -->
+        <GliderProfiles v-else-if="gliderMode" class="h-full" />
 
-        <div v-show="!castMode" class="h-full flex flex-col">
+        <div v-show="!castMode && !gliderMode" class="h-full flex flex-col">
         <div class="flex flex-wrap m-0 p-0 items-center" style="height: 38px;">
             <div class="drawer-header grow" style="min-width:0;">
                 <div class="title-text truncate">{{ title }}</div>
@@ -39,6 +41,7 @@ import { utc2pst } from '~~/composables/useUTC2PST';
 import { useMainStore } from '../stores/main';
 import { asOutsideDomainError, type OutsideDomainError } from '~~/composables/useDepthProfileFetch';
 import CastProfile from './cast/CastProfile.vue';
+import GliderProfiles from './glider/GliderProfiles.vue';
 
 type SelectedPoint = {
     lat: number;
@@ -83,6 +86,7 @@ const isOpen = computed({
 
 const mainStore = useMainStore();
 const castMode = computed(() => !!mainStore.selectedCastId);
+const gliderMode = computed(() => !!mainStore.selectedGliderId);
 
 const { variableLabel, displayUnit, toDisplayValue, formatDisplayValue } = useVariableRegistry();
 
@@ -186,8 +190,8 @@ onBeforeUnmount(() => {
     cancelRequest();
 });
 
-watch([requestParams, isOpen, castMode], ([params, open, cast]) => {
-    if (open && params && !cast) {
+watch([requestParams, isOpen, castMode, gliderMode], ([params, open, cast, glider]) => {
+    if (open && params && !cast && !glider) {
         fetchProfile(params);
     } else {
         clearChart();

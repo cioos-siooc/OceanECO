@@ -24,7 +24,7 @@ from modules.extractSensorTimeseries import extract_sensor_timeseries
 from modules.extract_depth_profile import extract_depth_profile
 from modules.extract_cross_section import extract_cross_section
 from modules.point_snapshot import extract_point_snapshot
-from modules.gliders import list_gliders, list_argo, extract_glider_section
+from modules.gliders import list_gliders, list_argo, extract_glider_section, glider_profile
 from modules.ship_casts import cast_years, list_casts, cast_profile
 from modules.sensor_coverage import sensor_coverage
 from modules.obs_area import obs_area
@@ -341,6 +341,29 @@ async def get_cast_profile(request: castProfileRequest, http: Request):
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         logger.exception("get_cast_profile failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class gliderProfileRequest(BaseModel):
+    deployment: str
+    # The nearest existing profile is returned: numbers can skip.
+    profile: int
+    var: str
+    # Model to overlay; omit for the profile alone.
+    source: Optional[str] = None
+
+@app.post("/gliderProfile")
+async def get_glider_profile(request: gliderProfileRequest, http: Request):
+    """One glider or Argo profile of one variable at full resolution, optionally with the model's profile there."""
+    try:
+        result = await asyncio.wait_for(
+            run_in_threadpool(glider_profile, request.deployment, request.profile, request.var, request.source),
+            timeout=THREADPOOL_TIMEOUT,
+        )
+        return _gzip_json(http, result)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.exception("get_glider_profile failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 class obsAreaPeriod(BaseModel):

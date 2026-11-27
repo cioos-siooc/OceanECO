@@ -219,7 +219,7 @@ import { utc2pst } from '~~/composables/useUTC2PST'
 import useStationsInteraction from '~~/composables/useStationsInteraction';
 import { haversineM } from '@/utils/sensorMerge';
 import { addCastLayer, setCastLayerVisibility, setSelectedCast, CAST_CLICK_LAYERS } from '~~/composables/useCastLayer';
-import { addGliderLayer, setGliderTracks, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
+import { addGliderLayer, setGliderTracks, setGliderPins, setSelectedGlider, setHoveredGlider, setGliderRangeTrack, GLIDER_CLICK_LAYERS, GLIDER_BASE_LAYER } from '~~/composables/useGliderLayer';
 import { setGliderCurtain, setGliderCurtainVisibility, setGliderSeafloor, setGliderSeafloorVisibility, setAreaVolume, cameraForAreaVolume, CURTAIN_EXAGGERATION } from '~~/composables/useGliderCurtain';
 import { hexToRgb } from '~~/composables/useFieldColorRamp';
 import { chart } from '@/config/palette';
@@ -1244,6 +1244,7 @@ async function addGliders() {
     (map as any).__glidersDetach?.();
     (map as any).__glidersDetach = detach;
     setSelectedGlider(map, mainStore.selectedGliderId);
+    setGliderPins(map, mainStore.gliderPins, mainStore.gliderHover);
     updateGliderCurtain();
     updateGliderSeafloor();
 }
@@ -1443,6 +1444,7 @@ watch(() => mainStore.selectedGliderId, (id) => {
     }
 });
 watch(() => mainStore.hoveredGliderId, (id) => setHoveredGlider(map, id));
+watch([() => mainStore.gliderPins, () => mainStore.gliderHover], ([pins, hover]) => setGliderPins(map, pins, hover));
 watch([() => mainStore.showGliderLayer, () => mainStore.showArgoLayer], () => {
     if (map?.getSource('glider-tracks')) setGliderTracks(map, mainStore.mapGliders, mainStore.gliderClips);
     setGliderCurtainVisibility(map, selectedGliderShown());

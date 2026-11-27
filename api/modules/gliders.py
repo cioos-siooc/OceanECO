@@ -15,6 +15,9 @@ along-track distance.
 An Argo float is served as a deployment too, with id "argo-<WMO>" and its
 cycles as profiles (`argo_profiles_sql`), so the map, section and Area code
 treat both alike. `list_argo()` lists the floats in `list_gliders()`' shape.
+
+`glider_profile()` returns one profile at full resolution, with the model's
+profile at its place and time when the model has one, for the profile drawer.
 """
 from __future__ import annotations
 
@@ -223,6 +226,44 @@ def list_argo() -> list[dict]:
             "active": track[-1][2] >= live_after,
             "track": [[round(lon, 5), round(lat, 5), int(t)] for lon, lat, t in track],
         })
+    return out
+
+
+def glider_profile(deployment_id: str, profile: int, var: str, source: str | None = None) -> dict:
+    """One variable of the deployment's profile nearest `profile` (numbers can
+    skip), at full resolution; with `source`, the model's profile there too
+    (`model` null plus `modelError` when it has none)."""
+    from modules.ship_casts import _model_profile  # ship_casts pulls in the model readers
+
+    table = argo_profiles_sql("[{d:String}]") if is_argo(deployment_id) else "glider_profiles"
+    params = {"d": deployment_id, "v": var, "p": int(profile)}
+    client = get_ch_client()
+    try:
+        meta = client.query(
+            f"SELECT profile, any(time), any(latitude), any(longitude) FROM {table} "
+            "WHERE deployment_id = {d:String} AND variable = {v:String} "
+            "GROUP BY profile ORDER BY abs(toInt64(profile) - {p:Int64}), profile LIMIT 1",
+            parameters=params,
+        ).result_rows
+        if not meta:
+            raise FileNotFoundError(f"No {var} profiles for {deployment_id}")
+        p, t, lat, lon = meta[0]
+        rows = client.query(
+            f"SELECT depth, value FROM {table} "
+            "WHERE deployment_id = {d:String} AND variable = {v:String} AND profile = {p:UInt32} AND isFinite(value) "
+            "ORDER BY depth",
+            parameters={**params, "p": int(p)},
+        ).result_rows
+    finally:
+        client.close()
+    out = {
+        "deployment": deployment_id, "profile": int(p), "time": _iso(t),
+        "lat": round(float(lat), 5), "lon": round(float(lon), 5), "var": var,
+        "depth": [round(float(d), 2) for d, _ in rows], "value": [float(v) for _, v in rows],
+        "model": None, "modelError": None,
+    }
+    if source:
+        out["model"], out["modelError"] = _model_profile(source, var, float(lat), float(lon), t)
     return out
 
 

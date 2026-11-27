@@ -48,3 +48,27 @@ export function sectionInPeriod(s: GliderSectionResponse, period: ResolvedObsFil
     if (keep.every(Boolean)) return s;
     return { ...s, values: s.values.map(row => row.map((v, c) => (keep[c] ? v : null))) };
 }
+
+/** One profile of one variable at full resolution, as `/gliderProfile` returns it. */
+export type GliderProfileResponse = {
+    deployment: string;
+    profile: number;                // the nearest existing profile to the one asked for
+    time: string;
+    lat: number;
+    lon: number;
+    depth: number[];
+    value: number[];                // canonical unit
+    model: { source: string; binMode: 'hourly' | 'daily'; depth: number[]; value: number[] } | null;
+    modelError: { code: string; message: string } | null;
+};
+
+const profileCache = createRequestCache<GliderProfileResponse>(600_000);
+
+/** POSTs to /gliderProfile; with `source`, the model's profile at it too. */
+export function fetchGliderProfile(deployment: string, profile: number, variable: string, source?: string | null): Promise<GliderProfileResponse> {
+    const apiBaseUrl = useRuntimeConfig().public.apiBaseUrl;
+    return profileCache.fetch(`${deployment}|${profile}|${variable}|${source ?? ''}`, async () => {
+        const response = await axios.post(`${apiBaseUrl}/gliderProfile`, { deployment, profile, var: variable, source: source ?? null });
+        return response.data;
+    });
+}

@@ -32,6 +32,9 @@ git tags; the dates below are the last commit on each version branch.
   chlorophyll. An Argo tab beside Gliders lists the floats; each is a marker at its
   latest fix, selecting one draws its track and opens its depth section in Explore, and
   its profiles join the Area tab and the observation-period filter.
+- **Glider and Argo profiles in the profile drawer**: click the section to pin a profile
+  (Shift-click to compare up to five, each colour-matched on the section, map and chart),
+  hover for a dashed preview, with the model's profile overlaid where it covers the latest.
 - **Ship casts layer**: DFO IOS CTD and rosette-bottle casts (`ios_casts_to_ch.py`,
   `/casts`, `/castProfile`), clustered on the map for the observation period, with a
   vertical-profile drawer view of any variable's profile (incl. nutrients and chlorophyll) and the

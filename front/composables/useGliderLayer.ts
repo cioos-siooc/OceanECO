@@ -17,6 +17,8 @@ const ACCENT = '#e2a336';
 const SOURCE_TRACKS = 'glider-tracks';
 const SOURCE_HEADS = 'glider-heads';
 const SOURCE_RANGE = 'glider-range';
+const SOURCE_PINS = 'glider-pins';
+const LAYER_PINS = 'glider-pins';
 const LAYER_TRACK_CASING = 'glider-track-casing';
 const LAYER_TRACK = 'glider-track';
 const LAYER_TRACK_SELECTED = 'glider-track-selected';
@@ -181,6 +183,18 @@ export async function addGliderLayer(
                 'icon-allow-overlap': true,
             },
         }, before);
+        // Profiles pinned into the profile drawer, in their pins' colours, and a
+        // ring at the section column under the cursor.
+        map.addSource(SOURCE_PINS, { type: 'geojson', data: EMPTY });
+        map.addLayer({
+            id: LAYER_PINS, type: 'circle', source: SOURCE_PINS,
+            paint: {
+                'circle-radius': ['case', ['get', 'hover'], 8, 6],
+                'circle-color': ['case', ['get', 'hover'], 'rgba(0,0,0,0)', ['get', 'color']],
+                'circle-stroke-color': ['case', ['get', 'hover'], INK, GROUND],
+                'circle-stroke-width': ['case', ['get', 'hover'], 2.5, 2],
+            },
+        }, before);
     }
 
     const handler = (evt: any) => {
@@ -243,6 +257,19 @@ export function setHoveredGlider(map: any, id: string | null) {
     map.getSource(SOURCE_TRACKS).setData(focusedTracks());
     map.setFilter(LAYER_TRACK_HOVER, id ? ['==', ['get', 'id'], id] : NONE);
     applyOpacity(map);
+}
+
+/** Dots at the profiles pinned into the profile drawer (those whose fix has
+ *  loaded), and a ring at the hovered section column, drawn over them. */
+export function setGliderPins(map: any, pins: { color: string, fix?: { lon: number, lat: number } }[], hover: { lon: number, lat: number } | null = null) {
+    const point = (lon: number, lat: number, properties: object) => ({ type: 'Feature', properties, geometry: { type: 'Point', coordinates: [lon, lat] } });
+    map?.getSource(SOURCE_PINS)?.setData({
+        type: 'FeatureCollection',
+        features: [
+            ...pins.filter(p => p.fix).map(p => point(p.fix!.lon, p.fix!.lat, { color: p.color, hover: false })),
+            ...(hover ? [point(hover.lon, hover.lat, { color: '', hover: true })] : []),
+        ],
+    });
 }
 
 /**

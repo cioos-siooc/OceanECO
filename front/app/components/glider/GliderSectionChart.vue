@@ -26,6 +26,10 @@ import { registerEchartsDarkTheme } from '~~/composables/useEchartsTheme'
  * and, once zoomed, a finer `detail` for the window; the detail wins wherever
  * it covers. Both share the same depth rows (`/gliderSection` keeps them fixed
  * per deployment), so only the columns differ.
+ *
+ * A click (not a drag) picks the profile under the cursor (`pick`, with
+ * whether Shift was held); moving over the cells reports the column under the
+ * cursor (`hover`, null on leaving). `marks` draws a tick per pinned profile.
  */
 
 export type SectionLayer = {
@@ -47,9 +51,14 @@ const props = defineProps<{
   xLabel: (profile: number) => string
   tooltipFormatter: (layer: SectionLayer, col: number, row: number, value: number | null) => string
   label?: string
+  marks?: { profile: number, color: string }[]
 }>()
 
-const emit = defineEmits<{ range: [range: [number, number] | null] }>()
+const emit = defineEmits<{
+  range: [range: [number, number] | null]
+  pick: [profile: number, add: boolean]
+  hover: [cell: { layer: SectionLayer, col: number } | null]
+}>()
 
 const GRID = { left: 44, right: 26, top: 6, bottom: 44 }
 const X_SLIDER = 0
@@ -193,6 +202,16 @@ watch(() => props.range, (r) => {
   })
 })
 
+watch(() => props.marks, () => chart?.setOption({ series: [{ markLine: markLine() }] }), { deep: true })
+
+/** A tick down the plot at each pinned profile, in its pin's colour. */
+function markLine() {
+  return {
+    silent: true, symbol: 'none', label: { show: false }, animation: false,
+    data: (props.marks ?? []).map(m => ({ xAxis: m.profile + 0.5, lineStyle: { color: m.color, width: 2, type: 'solid' as const } })),
+  }
+}
+
 watch(() => props.detail, schedulePaint)
 watch(() => props.overview, schedulePaint)
 watch(() => props.xLabel, () => chart?.setOption({
@@ -204,15 +223,41 @@ watch(() => props.xLabel, () => chart?.setOption({
 const tip = ref<{ x: number, y: number, html: string } | null>(null)
 const tipFlip = ref('none')
 
-function onMouseMove(e: { offsetX: number, offsetY: number }) {
+/** Profile number and cell under a pointer event, when it is over the cells. */
+function pointAt(e: { offsetX: number, offsetY: number }) {
   const el = chartRef.value
-  if (!chart || !el) return
+  if (!chart || !el) return null
   const inPlot = e.offsetX >= GRID.left && e.offsetX <= el.clientWidth - GRID.right
     && e.offsetY >= GRID.top && e.offsetY <= el.clientHeight - GRID.bottom
-  const [x, frac] = inPlot ? chart.convertFromPixel({ gridIndex: 0 }, [e.offsetX, e.offsetY]) as [number, number] : [NaN, NaN]
-  const cell = inPlot ? cellAt(x) : null
-  const row = inPlot ? rowAt(frac) : -1
-  if (!cell || row < 0) { tip.value = null; return }
+  if (!inPlot) return null
+  const [x, frac] = chart.convertFromPixel({ gridIndex: 0 }, [e.offsetX, e.offsetY]) as [number, number]
+  const cell = cellAt(x)
+  return cell ? { x, frac, cell } : null
+}
+
+let hovered: { layer: SectionLayer, col: number } | null = null
+function setHovered(cell: { layer: SectionLayer, col: number } | null) {
+  if (cell?.layer === hovered?.layer && cell?.col === hovered?.col) return
+  hovered = cell
+  emit('hover', cell)
+}
+
+function onClick(e: { offsetX: number, offsetY: number, event?: MouseEvent }) {
+  const pt = pointAt(e)
+  if (!pt) return
+  // Inside an averaged column, the profile under the cursor.
+  const { layer, col } = pt.cell
+  const p = Math.min(Math.max(Math.floor(pt.x), layer.profiles[col]!), layer.profileEnd[col]!)
+  emit('pick', p, !!e.event?.shiftKey)
+}
+
+function onMouseMove(e: { offsetX: number, offsetY: number }) {
+  const el = chartRef.value
+  const pt = pointAt(e)
+  setHovered(pt?.cell ?? null)
+  const cell = pt?.cell
+  const row = pt ? rowAt(pt.frac) : -1
+  if (!el || !cell || row < 0) { tip.value = null; return }
   const v = cell.layer.values[row]?.[cell.col] ?? null
   // Keep the box inside the panel: flip to the cursor's other side past the middle.
   const flipX = e.offsetX > el.clientWidth / 2, flipY = e.offsetY > el.clientHeight / 2
@@ -262,6 +307,7 @@ function option(): echarts.EChartsOption {
     series: [{
       type: 'custom', silent: true, renderItem: () => ({ type: 'group', children: [] }),
       data: [[p0, 0], [p1 + 1, 1]], encode: { x: 0, y: 1 },
+      markLine: markLine(),
     }],
   }
 }
@@ -276,7 +322,9 @@ onMounted(() => {
   chart.on('datazoom', onZoom)
   chart.on('finished', schedulePaint)
   chart.getZr().on('mousemove', onMouseMove)
-  chart.getZr().on('globalout', () => { tip.value = null })
+  // zrender fires click only when the pointer didn't move, so a pan never picks.
+  chart.getZr().on('click', onClick)
+  chart.getZr().on('globalout', () => { tip.value = null; setHovered(null) })
   if (typeof ResizeObserver !== 'undefined') {
     resizeObs = new ResizeObserver(() => { chart?.resize(); schedulePaint() })
     resizeObs.observe(chartRef.value)
